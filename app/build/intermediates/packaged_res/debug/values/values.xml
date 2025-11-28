@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cloud_white">#F0F6FC</color>
+    <color name="coral">#F85149</color>
+    <color name="emerald">#2EA043</color>
+    <color name="emerald_bright">#3FB950</color>
+    <color name="gold">#D4A72C</color>
+    <color name="ic_launcher_background">#0D1117</color>
+    <color name="obsidian">#0D1117</color>
+    <color name="obsidian_light">#161B22</color>
+    <string name="app_name">SecureBank</string>
+    <string name="available_balance">Available Balance</string>
+    <string name="continue_button">Continue</string>
+    <string name="dashboard_title">Dashboard</string>
+    <string name="debug_behavior_score">Behavior Score: %1$.2f</string>
+    <string name="login_button">Sign In</string>
+    <string name="login_error">Invalid credentials</string>
+    <string name="login_subtitle">Sign in to continue</string>
+    <string name="login_title">Welcome Back</string>
+    <string name="logout_button">Logout</string>
+    <string name="password_hint">Password</string>
+    <string name="pay_bills">Pay Bills</string>
+    <string name="quick_actions">Quick Actions</string>
+    <string name="recent_transactions">Recent Transactions</string>
+    <string name="recipient_account">Recipient Account Number</string>
+    <string name="risk_high">High Risk - Session may be compromised</string>
+    <string name="risk_low">Low Risk</string>
+    <string name="risk_medium">Medium Risk</string>
+    <string name="security_alert_title">Security Alert</string>
+    <string name="send_button">Send Money</string>
+    <string name="session_hijack_message">Unusual behavior detected. For your security, please verify your identity.</string>
+    <string name="transfer_amount">Amount</string>
+    <string name="transfer_funds">Transfer Funds</string>
+    <string name="transfer_remarks">Remarks (Optional)</string>
+    <string name="transfer_success">Transfer Successful</string>
+    <string name="transfer_title">Transfer Funds</string>
+    <string name="username_hint">Username</string>
+    <string name="verify_identity">Verify Identity</string>
+    <string name="view_statements">View Statements</string>
+    <style name="Theme.SecureBank" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

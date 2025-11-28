@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon colors -->
+    <color name="ic_launcher_background">#0D1117</color>
+    
+    <!-- Theme colors (matching Compose theme) -->
+    <color name="obsidian">#0D1117</color>
+    <color name="obsidian_light">#161B22</color>
+    <color name="emerald">#2EA043</color>
+    <color name="emerald_bright">#3FB950</color>
+    <color name="coral">#F85149</color>
+    <color name="gold">#D4A72C</color>
+    <color name="cloud_white">#F0F6FC</color>
+</resources>
+
