@@ -22,7 +22,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.securebank.app.data.model.KeystrokeData
+import com.securebank.app.data.model.MotionData
 import com.securebank.app.data.model.RiskLevel
+import com.securebank.app.data.model.TouchData
 import com.securebank.app.data.model.Transaction
 import com.securebank.app.data.model.TransactionType
 import com.securebank.app.data.model.User
@@ -51,8 +54,12 @@ fun DashboardScreen(
     riskScore: Float,
     riskLevel: RiskLevel,
     debugMode: Boolean,
+    liveMotionData: MotionData? = null,
+    liveTouchData: TouchData? = null,
+    liveKeystrokeData: KeystrokeData? = null,
     touchDataCollector: TouchDataCollector,
     onTransferClick: () -> Unit,
+    onResearchClick: () -> Unit = {},
     onLogout: () -> Unit,
     onToggleDebug: () -> Unit
 ) {
@@ -94,7 +101,8 @@ fun DashboardScreen(
                     // Quick Actions
                     item {
                         QuickActionsSection(
-                            onTransferClick = onTransferClick
+                            onTransferClick = onTransferClick,
+                            onResearchClick = onResearchClick
                         )
                     }
                     
@@ -172,6 +180,9 @@ fun DashboardScreen(
                     riskScore = riskScore,
                     riskLevel = riskLevel,
                     isVisible = debugMode,
+                    motionData = liveMotionData,
+                    touchData = liveTouchData,
+                    keystrokeData = liveKeystrokeData,
                     onToggle = onToggleDebug,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
@@ -304,7 +315,8 @@ private fun BalanceCard(
 
 @Composable
 private fun QuickActionsSection(
-    onTransferClick: () -> Unit
+    onTransferClick: () -> Unit,
+    onResearchClick: () -> Unit = {}
 ) {
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -329,10 +341,10 @@ private fun QuickActionsSection(
             )
             
             QuickActionButton(
-                icon = Icons.Default.Receipt,
-                label = "Pay Bills",
+                icon = Icons.Default.Science,
+                label = "Research",
                 color = Gold,
-                onClick = { /* TODO */ },
+                onClick = onResearchClick,
                 modifier = Modifier.weight(1f)
             )
             

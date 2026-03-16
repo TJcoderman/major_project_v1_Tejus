@@ -5,13 +5,18 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navigation
+import com.securebank.app.data.model.ExperimentSessionType
 import com.securebank.app.sensor.TouchDataCollector
 import com.securebank.app.ui.components.SecurityAlertDialog
 import com.securebank.app.ui.screens.DashboardScreen
+import com.securebank.app.ui.screens.ExperimentHubScreen
+import com.securebank.app.ui.screens.ExperimentSessionScreen
 import com.securebank.app.ui.screens.LoginScreen
 import com.securebank.app.ui.screens.TransferScreen
 import com.securebank.app.ui.viewmodel.AuthViewModel
 import com.securebank.app.ui.viewmodel.BankingViewModel
+import com.securebank.app.ui.viewmodel.ExperimentViewModel
 
 /**
  * Navigation routes for the app.
@@ -20,6 +25,11 @@ sealed class Screen(val route: String) {
     object Login : Screen("login")
     object Dashboard : Screen("dashboard")
     object Transfer : Screen("transfer")
+    object ExperimentHub : Screen("experiment_hub")
+    object ExperimentSession : Screen("experiment_session/{sessionType}/{profileOwnerId}") {
+        fun createRoute(sessionType: ExperimentSessionType, profileOwnerId: String?) =
+            "experiment_session/${sessionType.name}/${profileOwnerId ?: "self"}"
+    }
 }
 
 /**
@@ -46,6 +56,11 @@ fun SecureBankNavGraph(
     val debugMode by bankingViewModel.debugMode.collectAsState()
     val showSecurityAlert by bankingViewModel.showSecurityAlert.collectAsState()
     val securityAlertMessage by bankingViewModel.securityAlertMessage.collectAsState()
+    
+    // Real-time monitoring
+    val liveMotionData by bankingViewModel.liveMotionData.collectAsState()
+    val liveTouchData by bankingViewModel.liveTouchData.collectAsState()
+    val liveKeystrokeData by bankingViewModel.liveKeystrokeData.collectAsState()
     
     // Security Alert Dialog
     if (showSecurityAlert) {
@@ -99,9 +114,15 @@ fun SecureBankNavGraph(
                     riskScore = riskScore,
                     riskLevel = riskLevel,
                     debugMode = debugMode,
+                    liveMotionData = liveMotionData,
+                    liveTouchData = liveTouchData,
+                    liveKeystrokeData = liveKeystrokeData,
                     touchDataCollector = touchDataCollector,
                     onTransferClick = {
                         navController.navigate(Screen.Transfer.route)
+                    },
+                    onResearchClick = {
+                        navController.navigate(Screen.ExperimentHub.route)
                     },
                     onLogout = {
                         bankingViewModel.stopBehavioralCollection()
@@ -146,6 +167,51 @@ fun SecureBankNavGraph(
                     },
                     onReset = {
                         bankingViewModel.resetTransferState()
+                    }
+                )
+            }
+        }
+        
+        // Experiment Flow (nested graph to share ViewModel between Hub and Session)
+        navigation(
+            startDestination = Screen.ExperimentHub.route,
+            route = "experiment_flow"
+        ) {
+            composable(Screen.ExperimentHub.route) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("experiment_flow")
+                }
+                val experimentViewModel: ExperimentViewModel = hiltViewModel(parentEntry)
+
+                ExperimentHubScreen(
+                    viewModel = experimentViewModel,
+                    onStartSession = { sessionType, profileOwnerId ->
+                        experimentViewModel.startSession(sessionType, profileOwnerId)
+                        navController.navigate(
+                            Screen.ExperimentSession.createRoute(sessionType, profileOwnerId)
+                        )
+                    },
+                    onBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            // Experiment Session Screen (active data collection)
+            composable(Screen.ExperimentSession.route) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry("experiment_flow")
+                }
+                val experimentViewModel: ExperimentViewModel = hiltViewModel(parentEntry)
+
+                ExperimentSessionScreen(
+                    viewModel = experimentViewModel,
+                    onComplete = {
+                        experimentViewModel.resetSession()
+                        navController.popBackStack(Screen.ExperimentHub.route, false)
+                    },
+                    onBack = {
+                        navController.popBackStack()
                     }
                 )
             }

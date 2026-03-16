@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
         MotionData::class,
         BehavioralSession::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(

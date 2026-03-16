@@ -70,6 +70,16 @@ class BankingViewModel @Inject constructor(
     private val _debugMode = MutableStateFlow(true)
     val debugMode: StateFlow<Boolean> = _debugMode.asStateFlow()
     
+    // Real-time monitoring data (for Debug Panel)
+    private val _liveMotionData = MutableStateFlow<MotionData?>(null)
+    val liveMotionData: StateFlow<MotionData?> = _liveMotionData.asStateFlow()
+    
+    private val _liveTouchData = MutableStateFlow<TouchData?>(null)
+    val liveTouchData: StateFlow<TouchData?> = _liveTouchData.asStateFlow()
+    
+    private val _liveKeystrokeData = MutableStateFlow<KeystrokeData?>(null)
+    val liveKeystrokeData: StateFlow<KeystrokeData?> = _liveKeystrokeData.asStateFlow()
+    
     /**
      * Initializes banking data and starts behavioral collection.
      */
@@ -108,6 +118,7 @@ class BankingViewModel @Inject constructor(
         // Collect touch events
         touchCollectionJob = viewModelScope.launch {
             touchDataCollector.touchEvents.collect { touchData ->
+                _liveTouchData.value = touchData
                 behavioralRepository.saveTouch(touchData)
             }
         }
@@ -115,6 +126,7 @@ class BankingViewModel @Inject constructor(
         // Collect keystroke events
         viewModelScope.launch {
             keystrokeCollector.keystrokeEvents.collect { keystrokeData ->
+                _liveKeystrokeData.value = keystrokeData
                 behavioralRepository.saveKeystroke(keystrokeData)
             }
         }
@@ -125,6 +137,40 @@ class BankingViewModel @Inject constructor(
                 val motionBuffer = mutableListOf<MotionData>()
                 
                 sensorDataCollector.startCollection(sessionId).collect { motionData ->
+                    _liveMotionData.value = motionData
+                    
+                    // Process real-time risk update for this motion event
+                    val recommendation = behaviorAnalyzer.processRealTimeMotion(motionData)
+                    if (recommendation != SecurityRecommendation.CONTINUE) {
+                        // We wrap this in a dummy RiskAssessment just to reuse the handler logic,
+                        // or we can call handleRiskAssessment with a constructed object.
+                        // But handleRiskAssessment expects a full object. Let's just handle the recommendation directly here 
+                        // or create a lightweight assessment object.
+                        
+                        // Since we don't have full anomaly list here easily, we rely on the fact 
+                        // that processRealTimeMotion updates the shared state flow for risk score/level.
+                        // We just need to trigger the UI action.
+                        
+                        when (recommendation) {
+                            SecurityRecommendation.REQUEST_REAUTHENTICATION -> {
+                                _securityAlertMessage.value = "Real-time anomaly detected. Please verify identity."
+                                _showSecurityAlert.value = true
+                                vibrate()
+                            }
+                            SecurityRecommendation.FORCE_LOGOUT -> {
+                                _securityAlertMessage.value = "Critical motion anomaly detected. Session terminated."
+                                _showSecurityAlert.value = true
+                                vibrate()
+                            }
+                            SecurityRecommendation.SHOW_WARNING -> {
+                                if (_debugMode.value) {
+                                    showToast("⚠️ Motion anomaly detected!")
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                    
                     motionBuffer.add(motionData)
                     
                     // Batch save every 10 readings to reduce database writes
@@ -263,7 +309,7 @@ class BankingViewModel @Inject constructor(
             )
             
             result.fold(
-                onSuccess = { transaction ->
+                onSuccess = { _ ->
                     _userBalance.value = _userBalance.value - amount
                     _transferState.value = TransferState(isSuccess = true)
                     showToast("Transfer successful!")

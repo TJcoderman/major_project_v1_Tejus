@@ -9,10 +9,10 @@ import com.securebank.app.sensor.SensorDataCollector;
 import com.securebank.app.sensor.TouchDataCollector;
 import dagger.internal.DaggerGenerated;
 import dagger.internal.Factory;
+import dagger.internal.Provider;
 import dagger.internal.QualifierMetadata;
 import dagger.internal.ScopeMetadata;
 import javax.annotation.processing.Generated;
-import javax.inject.Provider;
 
 @ScopeMetadata
 @QualifierMetadata("dagger.hilt.android.qualifiers.ApplicationContext")
@@ -25,7 +25,10 @@ import javax.inject.Provider;
     "unchecked",
     "rawtypes",
     "KotlinInternal",
-    "KotlinInternalInJava"
+    "KotlinInternalInJava",
+    "cast",
+    "deprecation",
+    "nullness:initialization.field.uninitialized"
 })
 public final class BankingViewModel_Factory implements Factory<BankingViewModel> {
   private final Provider<Context> contextProvider;

@@ -6,6 +6,7 @@ import android.view.View;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.SavedStateHandle;
 import androidx.lifecycle.ViewModel;
+import com.securebank.app.data.export.DataExporter;
 import com.securebank.app.data.local.SecureBankDatabase;
 import com.securebank.app.data.local.dao.BehavioralSessionDao;
 import com.securebank.app.data.local.dao.KeystrokeDao;
@@ -15,7 +16,6 @@ import com.securebank.app.data.local.dao.TransactionDao;
 import com.securebank.app.data.local.dao.UserDao;
 import com.securebank.app.data.repository.BehavioralRepository;
 import com.securebank.app.data.repository.UserRepository;
-import com.securebank.app.di.AppModule;
 import com.securebank.app.di.AppModule_ProvideBehavioralSessionDaoFactory;
 import com.securebank.app.di.AppModule_ProvideDatabaseFactory;
 import com.securebank.app.di.AppModule_ProvideKeystrokeDaoFactory;
@@ -24,16 +24,24 @@ import com.securebank.app.di.AppModule_ProvideTouchDaoFactory;
 import com.securebank.app.di.AppModule_ProvideTransactionDaoFactory;
 import com.securebank.app.di.AppModule_ProvideUserDaoFactory;
 import com.securebank.app.domain.BehaviorAnalyzer;
+import com.securebank.app.domain.FeatureExtractor;
 import com.securebank.app.sensor.KeystrokeCollector;
 import com.securebank.app.sensor.SensorDataCollector;
 import com.securebank.app.sensor.TouchDataCollector;
 import com.securebank.app.ui.viewmodel.AuthViewModel;
-import com.securebank.app.ui.viewmodel.AuthViewModel_HiltModules_KeyModule_ProvideFactory;
+import com.securebank.app.ui.viewmodel.AuthViewModel_HiltModules;
+import com.securebank.app.ui.viewmodel.AuthViewModel_HiltModules_BindsModule_Binds_LazyMapKey;
+import com.securebank.app.ui.viewmodel.AuthViewModel_HiltModules_KeyModule_Provide_LazyMapKey;
 import com.securebank.app.ui.viewmodel.BankingViewModel;
-import com.securebank.app.ui.viewmodel.BankingViewModel_HiltModules_KeyModule_ProvideFactory;
+import com.securebank.app.ui.viewmodel.BankingViewModel_HiltModules;
+import com.securebank.app.ui.viewmodel.BankingViewModel_HiltModules_BindsModule_Binds_LazyMapKey;
+import com.securebank.app.ui.viewmodel.BankingViewModel_HiltModules_KeyModule_Provide_LazyMapKey;
+import com.securebank.app.ui.viewmodel.ExperimentViewModel;
+import com.securebank.app.ui.viewmodel.ExperimentViewModel_HiltModules;
+import com.securebank.app.ui.viewmodel.ExperimentViewModel_HiltModules_BindsModule_Binds_LazyMapKey;
+import com.securebank.app.ui.viewmodel.ExperimentViewModel_HiltModules_KeyModule_Provide_LazyMapKey;
 import dagger.hilt.android.ActivityRetainedLifecycle;
 import dagger.hilt.android.ViewModelLifecycle;
-import dagger.hilt.android.flags.HiltWrapper_FragmentGetContextFix_FragmentGetContextFixModule;
 import dagger.hilt.android.internal.builders.ActivityComponentBuilder;
 import dagger.hilt.android.internal.builders.ActivityRetainedComponentBuilder;
 import dagger.hilt.android.internal.builders.FragmentComponentBuilder;
@@ -44,18 +52,19 @@ import dagger.hilt.android.internal.builders.ViewWithFragmentComponentBuilder;
 import dagger.hilt.android.internal.lifecycle.DefaultViewModelFactories;
 import dagger.hilt.android.internal.lifecycle.DefaultViewModelFactories_InternalFactoryFactory_Factory;
 import dagger.hilt.android.internal.managers.ActivityRetainedComponentManager_LifecycleModule_ProvideActivityRetainedLifecycleFactory;
+import dagger.hilt.android.internal.managers.SavedStateHandleHolder;
 import dagger.hilt.android.internal.modules.ApplicationContextModule;
 import dagger.hilt.android.internal.modules.ApplicationContextModule_ProvideContextFactory;
 import dagger.internal.DaggerGenerated;
 import dagger.internal.DoubleCheck;
+import dagger.internal.LazyClassKeyMap;
 import dagger.internal.MapBuilder;
 import dagger.internal.Preconditions;
-import dagger.internal.SetBuilder;
+import dagger.internal.Provider;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.processing.Generated;
-import javax.inject.Provider;
 
 @DaggerGenerated
 @Generated(
@@ -66,7 +75,10 @@ import javax.inject.Provider;
     "unchecked",
     "rawtypes",
     "KotlinInternal",
-    "KotlinInternalInJava"
+    "KotlinInternalInJava",
+    "cast",
+    "deprecation",
+    "nullness:initialization.field.uninitialized"
 })
 public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
   private DaggerSecureBankApplication_HiltComponents_SingletonC() {
@@ -82,27 +94,8 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
     private Builder() {
     }
 
-    /**
-     * @deprecated This module is declared, but an instance is not used in the component. This method is a no-op. For more, see https://dagger.dev/unused-modules.
-     */
-    @Deprecated
-    public Builder appModule(AppModule appModule) {
-      Preconditions.checkNotNull(appModule);
-      return this;
-    }
-
     public Builder applicationContextModule(ApplicationContextModule applicationContextModule) {
       this.applicationContextModule = Preconditions.checkNotNull(applicationContextModule);
-      return this;
-    }
-
-    /**
-     * @deprecated This module is declared, but an instance is not used in the component. This method is a no-op. For more, see https://dagger.dev/unused-modules.
-     */
-    @Deprecated
-    public Builder hiltWrapper_FragmentGetContextFix_FragmentGetContextFixModule(
-        HiltWrapper_FragmentGetContextFix_FragmentGetContextFixModule hiltWrapper_FragmentGetContextFix_FragmentGetContextFixModule) {
-      Preconditions.checkNotNull(hiltWrapper_FragmentGetContextFix_FragmentGetContextFixModule);
       return this;
     }
 
@@ -115,13 +108,23 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
   private static final class ActivityRetainedCBuilder implements SecureBankApplication_HiltComponents.ActivityRetainedC.Builder {
     private final SingletonCImpl singletonCImpl;
 
+    private SavedStateHandleHolder savedStateHandleHolder;
+
     private ActivityRetainedCBuilder(SingletonCImpl singletonCImpl) {
       this.singletonCImpl = singletonCImpl;
     }
 
     @Override
+    public ActivityRetainedCBuilder savedStateHandleHolder(
+        SavedStateHandleHolder savedStateHandleHolder) {
+      this.savedStateHandleHolder = Preconditions.checkNotNull(savedStateHandleHolder);
+      return this;
+    }
+
+    @Override
     public SecureBankApplication_HiltComponents.ActivityRetainedC build() {
-      return new ActivityRetainedCImpl(singletonCImpl);
+      Preconditions.checkBuilderRequirement(savedStateHandleHolder, SavedStateHandleHolder.class);
+      return new ActivityRetainedCImpl(singletonCImpl, savedStateHandleHolder);
     }
   }
 
@@ -310,7 +313,7 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final ViewWithFragmentCImpl viewWithFragmentCImpl = this;
 
-    private ViewWithFragmentCImpl(SingletonCImpl singletonCImpl,
+    ViewWithFragmentCImpl(SingletonCImpl singletonCImpl,
         ActivityRetainedCImpl activityRetainedCImpl, ActivityCImpl activityCImpl,
         FragmentCImpl fragmentCImpl, View viewParam) {
       this.singletonCImpl = singletonCImpl;
@@ -331,9 +334,8 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final FragmentCImpl fragmentCImpl = this;
 
-    private FragmentCImpl(SingletonCImpl singletonCImpl,
-        ActivityRetainedCImpl activityRetainedCImpl, ActivityCImpl activityCImpl,
-        Fragment fragmentParam) {
+    FragmentCImpl(SingletonCImpl singletonCImpl, ActivityRetainedCImpl activityRetainedCImpl,
+        ActivityCImpl activityCImpl, Fragment fragmentParam) {
       this.singletonCImpl = singletonCImpl;
       this.activityRetainedCImpl = activityRetainedCImpl;
       this.activityCImpl = activityCImpl;
@@ -361,7 +363,7 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final ViewCImpl viewCImpl = this;
 
-    private ViewCImpl(SingletonCImpl singletonCImpl, ActivityRetainedCImpl activityRetainedCImpl,
+    ViewCImpl(SingletonCImpl singletonCImpl, ActivityRetainedCImpl activityRetainedCImpl,
         ActivityCImpl activityCImpl, View viewParam) {
       this.singletonCImpl = singletonCImpl;
       this.activityRetainedCImpl = activityRetainedCImpl;
@@ -378,8 +380,8 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final ActivityCImpl activityCImpl = this;
 
-    private ActivityCImpl(SingletonCImpl singletonCImpl,
-        ActivityRetainedCImpl activityRetainedCImpl, Activity activityParam) {
+    ActivityCImpl(SingletonCImpl singletonCImpl, ActivityRetainedCImpl activityRetainedCImpl,
+        Activity activityParam) {
       this.singletonCImpl = singletonCImpl;
       this.activityRetainedCImpl = activityRetainedCImpl;
 
@@ -397,8 +399,8 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
     }
 
     @Override
-    public Set<String> getViewModelKeys() {
-      return SetBuilder.<String>newSetBuilder(2).add(AuthViewModel_HiltModules_KeyModule_ProvideFactory.provide()).add(BankingViewModel_HiltModules_KeyModule_ProvideFactory.provide()).build();
+    public Map<Class<?>, Boolean> getViewModelKeys() {
+      return LazyClassKeyMap.<Boolean>of(MapBuilder.<String, Boolean>newMapBuilder(3).put(AuthViewModel_HiltModules_KeyModule_Provide_LazyMapKey.lazyClassKeyName, AuthViewModel_HiltModules.KeyModule.provide()).put(BankingViewModel_HiltModules_KeyModule_Provide_LazyMapKey.lazyClassKeyName, BankingViewModel_HiltModules.KeyModule.provide()).put(ExperimentViewModel_HiltModules_KeyModule_Provide_LazyMapKey.lazyClassKeyName, ExperimentViewModel_HiltModules.KeyModule.provide()).build());
     }
 
     @Override
@@ -430,13 +432,14 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final ViewModelCImpl viewModelCImpl = this;
 
-    private Provider<AuthViewModel> authViewModelProvider;
+    Provider<AuthViewModel> authViewModelProvider;
 
-    private Provider<BankingViewModel> bankingViewModelProvider;
+    Provider<BankingViewModel> bankingViewModelProvider;
 
-    private ViewModelCImpl(SingletonCImpl singletonCImpl,
-        ActivityRetainedCImpl activityRetainedCImpl, SavedStateHandle savedStateHandleParam,
-        ViewModelLifecycle viewModelLifecycleParam) {
+    Provider<ExperimentViewModel> experimentViewModelProvider;
+
+    ViewModelCImpl(SingletonCImpl singletonCImpl, ActivityRetainedCImpl activityRetainedCImpl,
+        SavedStateHandle savedStateHandleParam, ViewModelLifecycle viewModelLifecycleParam) {
       this.singletonCImpl = singletonCImpl;
       this.activityRetainedCImpl = activityRetainedCImpl;
 
@@ -449,11 +452,17 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
         final ViewModelLifecycle viewModelLifecycleParam) {
       this.authViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 0);
       this.bankingViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 1);
+      this.experimentViewModelProvider = new SwitchingProvider<>(singletonCImpl, activityRetainedCImpl, viewModelCImpl, 2);
     }
 
     @Override
-    public Map<String, Provider<ViewModel>> getHiltViewModelMap() {
-      return MapBuilder.<String, Provider<ViewModel>>newMapBuilder(2).put("com.securebank.app.ui.viewmodel.AuthViewModel", ((Provider) authViewModelProvider)).put("com.securebank.app.ui.viewmodel.BankingViewModel", ((Provider) bankingViewModelProvider)).build();
+    public Map<Class<?>, javax.inject.Provider<ViewModel>> getHiltViewModelMap() {
+      return LazyClassKeyMap.<javax.inject.Provider<ViewModel>>of(MapBuilder.<String, javax.inject.Provider<ViewModel>>newMapBuilder(3).put(AuthViewModel_HiltModules_BindsModule_Binds_LazyMapKey.lazyClassKeyName, ((Provider) authViewModelProvider)).put(BankingViewModel_HiltModules_BindsModule_Binds_LazyMapKey.lazyClassKeyName, ((Provider) bankingViewModelProvider)).put(ExperimentViewModel_HiltModules_BindsModule_Binds_LazyMapKey.lazyClassKeyName, ((Provider) experimentViewModelProvider)).build());
+    }
+
+    @Override
+    public Map<Class<?>, Object> getHiltViewModelAssistedMap() {
+      return Collections.<Class<?>, Object>emptyMap();
     }
 
     private static final class SwitchingProvider<T> implements Provider<T> {
@@ -477,11 +486,14 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
       @Override
       public T get() {
         switch (id) {
-          case 0: // com.securebank.app.ui.viewmodel.AuthViewModel 
+          case 0: // com.securebank.app.ui.viewmodel.AuthViewModel
           return (T) new AuthViewModel(singletonCImpl.userRepositoryProvider.get(), singletonCImpl.behavioralRepositoryProvider.get(), singletonCImpl.keystrokeCollectorProvider.get(), singletonCImpl.behaviorAnalyzerProvider.get());
 
-          case 1: // com.securebank.app.ui.viewmodel.BankingViewModel 
+          case 1: // com.securebank.app.ui.viewmodel.BankingViewModel
           return (T) new BankingViewModel(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule), singletonCImpl.userRepositoryProvider.get(), singletonCImpl.behavioralRepositoryProvider.get(), singletonCImpl.sensorDataCollectorProvider.get(), singletonCImpl.touchDataCollectorProvider.get(), singletonCImpl.keystrokeCollectorProvider.get(), singletonCImpl.behaviorAnalyzerProvider.get());
+
+          case 2: // com.securebank.app.ui.viewmodel.ExperimentViewModel
+          return (T) new ExperimentViewModel(singletonCImpl.behavioralRepositoryProvider.get(), singletonCImpl.keystrokeCollectorProvider.get(), singletonCImpl.touchDataCollectorProvider.get(), singletonCImpl.sensorDataCollectorProvider.get(), singletonCImpl.dataExporterProvider.get(), singletonCImpl.featureExtractorProvider.get());
 
           default: throw new AssertionError(id);
         }
@@ -494,17 +506,18 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final ActivityRetainedCImpl activityRetainedCImpl = this;
 
-    private Provider<ActivityRetainedLifecycle> provideActivityRetainedLifecycleProvider;
+    Provider<ActivityRetainedLifecycle> provideActivityRetainedLifecycleProvider;
 
-    private ActivityRetainedCImpl(SingletonCImpl singletonCImpl) {
+    ActivityRetainedCImpl(SingletonCImpl singletonCImpl,
+        SavedStateHandleHolder savedStateHandleHolderParam) {
       this.singletonCImpl = singletonCImpl;
 
-      initialize();
+      initialize(savedStateHandleHolderParam);
 
     }
 
     @SuppressWarnings("unchecked")
-    private void initialize() {
+    private void initialize(final SavedStateHandleHolder savedStateHandleHolderParam) {
       this.provideActivityRetainedLifecycleProvider = DoubleCheck.provider(new SwitchingProvider<ActivityRetainedLifecycle>(singletonCImpl, activityRetainedCImpl, 0));
     }
 
@@ -536,7 +549,7 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
       @Override
       public T get() {
         switch (id) {
-          case 0: // dagger.hilt.android.ActivityRetainedLifecycle 
+          case 0: // dagger.hilt.android.ActivityRetainedLifecycle
           return (T) ActivityRetainedComponentManager_LifecycleModule_ProvideActivityRetainedLifecycleFactory.provideActivityRetainedLifecycle();
 
           default: throw new AssertionError(id);
@@ -550,7 +563,7 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final ServiceCImpl serviceCImpl = this;
 
-    private ServiceCImpl(SingletonCImpl singletonCImpl, Service serviceParam) {
+    ServiceCImpl(SingletonCImpl singletonCImpl, Service serviceParam) {
       this.singletonCImpl = singletonCImpl;
 
 
@@ -562,33 +575,37 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     private final SingletonCImpl singletonCImpl = this;
 
-    private Provider<SensorDataCollector> sensorDataCollectorProvider;
+    Provider<SensorDataCollector> sensorDataCollectorProvider;
 
-    private Provider<TouchDataCollector> touchDataCollectorProvider;
+    Provider<TouchDataCollector> touchDataCollectorProvider;
 
-    private Provider<SecureBankDatabase> provideDatabaseProvider;
+    Provider<SecureBankDatabase> provideDatabaseProvider;
 
-    private Provider<UserDao> provideUserDaoProvider;
+    Provider<UserDao> provideUserDaoProvider;
 
-    private Provider<TransactionDao> provideTransactionDaoProvider;
+    Provider<TransactionDao> provideTransactionDaoProvider;
 
-    private Provider<UserRepository> userRepositoryProvider;
+    Provider<UserRepository> userRepositoryProvider;
 
-    private Provider<KeystrokeDao> provideKeystrokeDaoProvider;
+    Provider<KeystrokeDao> provideKeystrokeDaoProvider;
 
-    private Provider<TouchDao> provideTouchDaoProvider;
+    Provider<TouchDao> provideTouchDaoProvider;
 
-    private Provider<MotionDao> provideMotionDaoProvider;
+    Provider<MotionDao> provideMotionDaoProvider;
 
-    private Provider<BehavioralSessionDao> provideBehavioralSessionDaoProvider;
+    Provider<BehavioralSessionDao> provideBehavioralSessionDaoProvider;
 
-    private Provider<BehavioralRepository> behavioralRepositoryProvider;
+    Provider<BehavioralRepository> behavioralRepositoryProvider;
 
-    private Provider<KeystrokeCollector> keystrokeCollectorProvider;
+    Provider<KeystrokeCollector> keystrokeCollectorProvider;
 
-    private Provider<BehaviorAnalyzer> behaviorAnalyzerProvider;
+    Provider<BehaviorAnalyzer> behaviorAnalyzerProvider;
 
-    private SingletonCImpl(ApplicationContextModule applicationContextModuleParam) {
+    Provider<DataExporter> dataExporterProvider;
+
+    Provider<FeatureExtractor> featureExtractorProvider;
+
+    SingletonCImpl(ApplicationContextModule applicationContextModuleParam) {
       this.applicationContextModule = applicationContextModuleParam;
       initialize(applicationContextModuleParam);
 
@@ -609,6 +626,8 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
       this.behavioralRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<BehavioralRepository>(singletonCImpl, 6));
       this.keystrokeCollectorProvider = DoubleCheck.provider(new SwitchingProvider<KeystrokeCollector>(singletonCImpl, 11));
       this.behaviorAnalyzerProvider = DoubleCheck.provider(new SwitchingProvider<BehaviorAnalyzer>(singletonCImpl, 12));
+      this.dataExporterProvider = DoubleCheck.provider(new SwitchingProvider<DataExporter>(singletonCImpl, 13));
+      this.featureExtractorProvider = DoubleCheck.provider(new SwitchingProvider<FeatureExtractor>(singletonCImpl, 14));
     }
 
     @Override
@@ -644,44 +663,50 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
       @Override
       public T get() {
         switch (id) {
-          case 0: // com.securebank.app.sensor.SensorDataCollector 
+          case 0: // com.securebank.app.sensor.SensorDataCollector
           return (T) new SensorDataCollector(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule));
 
-          case 1: // com.securebank.app.sensor.TouchDataCollector 
+          case 1: // com.securebank.app.sensor.TouchDataCollector
           return (T) new TouchDataCollector();
 
-          case 2: // com.securebank.app.data.repository.UserRepository 
+          case 2: // com.securebank.app.data.repository.UserRepository
           return (T) new UserRepository(singletonCImpl.provideUserDaoProvider.get(), singletonCImpl.provideTransactionDaoProvider.get());
 
-          case 3: // com.securebank.app.data.local.dao.UserDao 
+          case 3: // com.securebank.app.data.local.dao.UserDao
           return (T) AppModule_ProvideUserDaoFactory.provideUserDao(singletonCImpl.provideDatabaseProvider.get());
 
-          case 4: // com.securebank.app.data.local.SecureBankDatabase 
+          case 4: // com.securebank.app.data.local.SecureBankDatabase
           return (T) AppModule_ProvideDatabaseFactory.provideDatabase(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule));
 
-          case 5: // com.securebank.app.data.local.dao.TransactionDao 
+          case 5: // com.securebank.app.data.local.dao.TransactionDao
           return (T) AppModule_ProvideTransactionDaoFactory.provideTransactionDao(singletonCImpl.provideDatabaseProvider.get());
 
-          case 6: // com.securebank.app.data.repository.BehavioralRepository 
+          case 6: // com.securebank.app.data.repository.BehavioralRepository
           return (T) new BehavioralRepository(singletonCImpl.provideKeystrokeDaoProvider.get(), singletonCImpl.provideTouchDaoProvider.get(), singletonCImpl.provideMotionDaoProvider.get(), singletonCImpl.provideBehavioralSessionDaoProvider.get());
 
-          case 7: // com.securebank.app.data.local.dao.KeystrokeDao 
+          case 7: // com.securebank.app.data.local.dao.KeystrokeDao
           return (T) AppModule_ProvideKeystrokeDaoFactory.provideKeystrokeDao(singletonCImpl.provideDatabaseProvider.get());
 
-          case 8: // com.securebank.app.data.local.dao.TouchDao 
+          case 8: // com.securebank.app.data.local.dao.TouchDao
           return (T) AppModule_ProvideTouchDaoFactory.provideTouchDao(singletonCImpl.provideDatabaseProvider.get());
 
-          case 9: // com.securebank.app.data.local.dao.MotionDao 
+          case 9: // com.securebank.app.data.local.dao.MotionDao
           return (T) AppModule_ProvideMotionDaoFactory.provideMotionDao(singletonCImpl.provideDatabaseProvider.get());
 
-          case 10: // com.securebank.app.data.local.dao.BehavioralSessionDao 
+          case 10: // com.securebank.app.data.local.dao.BehavioralSessionDao
           return (T) AppModule_ProvideBehavioralSessionDaoFactory.provideBehavioralSessionDao(singletonCImpl.provideDatabaseProvider.get());
 
-          case 11: // com.securebank.app.sensor.KeystrokeCollector 
+          case 11: // com.securebank.app.sensor.KeystrokeCollector
           return (T) new KeystrokeCollector();
 
-          case 12: // com.securebank.app.domain.BehaviorAnalyzer 
+          case 12: // com.securebank.app.domain.BehaviorAnalyzer
           return (T) new BehaviorAnalyzer(singletonCImpl.behavioralRepositoryProvider.get(), singletonCImpl.keystrokeCollectorProvider.get());
+
+          case 13: // com.securebank.app.data.export.DataExporter
+          return (T) new DataExporter(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule), singletonCImpl.behavioralRepositoryProvider.get());
+
+          case 14: // com.securebank.app.domain.FeatureExtractor
+          return (T) new FeatureExtractor();
 
           default: throw new AssertionError(id);
         }

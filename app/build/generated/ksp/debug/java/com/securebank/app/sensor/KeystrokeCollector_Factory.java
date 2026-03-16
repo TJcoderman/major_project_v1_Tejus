@@ -17,7 +17,10 @@ import javax.annotation.processing.Generated;
     "unchecked",
     "rawtypes",
     "KotlinInternal",
-    "KotlinInternalInJava"
+    "KotlinInternalInJava",
+    "cast",
+    "deprecation",
+    "nullness:initialization.field.uninitialized"
 })
 public final class KeystrokeCollector_Factory implements Factory<KeystrokeCollector> {
   @Override
@@ -34,6 +37,6 @@ public final class KeystrokeCollector_Factory implements Factory<KeystrokeCollec
   }
 
   private static final class InstanceHolder {
-    private static final KeystrokeCollector_Factory INSTANCE = new KeystrokeCollector_Factory();
+    static final KeystrokeCollector_Factory INSTANCE = new KeystrokeCollector_Factory();
   }
 }

@@ -345,6 +345,49 @@ class BehaviorAnalyzer @Inject constructor(
             (totalDeviation / deviationCount).coerceIn(0f, 1f)
         } else 0f
     }
+
+    /**
+     * Processes real-time motion data to update risk score immediately.
+     */
+    fun processRealTimeMotion(motionData: MotionData): SecurityRecommendation {
+        // Calculate immediate deviation (Z-Score based)
+        var maxZScore = 0f
+        
+        if (baselineDevicePitch != 0f) {
+             val zScore = abs(motionData.pitch - baselineDevicePitch) / 15f
+             if (zScore > maxZScore) maxZScore = zScore
+        }
+
+        if (baselineDeviceRoll != 0f) {
+             val zScore = abs(motionData.roll - baselineDeviceRoll) / 15f
+             if (zScore > maxZScore) maxZScore = zScore
+        }
+        
+        // Convert Z-Score to Risk Score (0.0 - 1.0)
+        // 3 Sigma = 1.0 (High Risk)
+        val instantaneousRisk = (maxZScore / 3.0f).coerceIn(0f, 1f)
+        
+        // Smooth update of current score
+        // Use a faster smoothing factor (0.1) for responsiveness
+        val smoothedScore = (0.1f * instantaneousRisk) + (0.9f * _currentRiskScore.value)
+        
+        _currentRiskScore.value = smoothedScore
+        _currentRiskLevel.value = determineRiskLevel(smoothedScore)
+        
+        return if (_currentRiskLevel.value == RiskLevel.CRITICAL || _currentRiskLevel.value == RiskLevel.HIGH) {
+            // Trigger immediate recommendation
+             val anomalies = listOf(
+                 BehavioralAnomaly(
+                     type = AnomalyType.DEVICE_ORIENTATION_CHANGE,
+                     severity = instantaneousRisk,
+                     description = "Real-time orientation anomaly (Z: %.1f)".format(maxZScore)
+                 )
+             )
+            determineRecommendation(_currentRiskLevel.value, anomalies)
+        } else {
+            SecurityRecommendation.CONTINUE
+        }
+    }
     
     /**
      * Calculates weighted risk score from individual deviations.

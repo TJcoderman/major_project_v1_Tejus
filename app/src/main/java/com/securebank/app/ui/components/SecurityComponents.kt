@@ -16,13 +16,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.securebank.app.data.model.KeystrokeData
+import com.securebank.app.data.model.MotionData
 import com.securebank.app.data.model.RiskLevel
+import com.securebank.app.data.model.TouchData
 import com.securebank.app.ui.theme.*
 
 /**
@@ -239,6 +243,9 @@ fun DebugBehaviorPanel(
     riskScore: Float,
     riskLevel: RiskLevel,
     isVisible: Boolean,
+    motionData: MotionData? = null,
+    touchData: TouchData? = null,
+    keystrokeData: KeystrokeData? = null,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -284,36 +291,10 @@ fun DebugBehaviorPanel(
                 
                 Divider(color = ObsidianBorder)
                 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Risk Score:", color = MutedGray, fontSize = 14.sp)
-                    Text(
-                        text = "${(riskScore * 100).toInt()}%",
-                        color = when (riskLevel) {
-                            RiskLevel.LOW -> Emerald
-                            RiskLevel.MEDIUM -> Gold
-                            RiskLevel.HIGH, RiskLevel.CRITICAL -> Coral
-                        },
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
+                // Risk Info
+                DebugRow("Risk Score", "${(riskScore * 100).toInt()}%")
+                DebugRow("Risk Level", riskLevel.name)
                 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Risk Level:", color = MutedGray, fontSize = 14.sp)
-                    RiskIndicatorBadge(
-                        riskLevel = riskLevel,
-                        riskScore = riskScore,
-                        showScore = false
-                    )
-                }
-                
-                // Risk score progress bar
                 LinearProgressIndicator(
                     progress = riskScore,
                     modifier = Modifier
@@ -327,8 +308,46 @@ fun DebugBehaviorPanel(
                     },
                     trackColor = ObsidianBorder
                 )
+
+                Divider(color = ObsidianBorder)
+                Text("Real-time Sensors", style = MaterialTheme.typography.labelSmall, color = MutedGray)
+
+                // Motion Data
+                if (motionData != null) {
+                    DebugRow("Pitch / Roll", "%.1f° / %.1f°".format(motionData.pitch, motionData.roll))
+                    DebugRow("Accel (X,Y,Z)", "%.1f, %.1f, %.1f".format(motionData.accelX, motionData.accelY, motionData.accelZ))
+                } else {
+                    DebugRow("Motion", "Waiting for data...")
+                }
+
+                // Touch Data
+                if (touchData != null) {
+                    DebugRow("Touch Pressure", "%.2f".format(touchData.pressure))
+                    DebugRow("Swipe Velocity", "%.0f px/s".format(touchData.velocity))
+                } else {
+                    DebugRow("Touch", "Waiting for interaction...")
+                }
+
+                // Keystroke Data
+                if (keystrokeData != null) {
+                    DebugRow("Last Key Dwell", "${keystrokeData.dwellTime}ms")
+                    DebugRow("Last Flight Time", "${keystrokeData.flightTime}ms")
+                } else {
+                    DebugRow("Keystroke", "Waiting for typing...")
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun DebugRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = MutedGray, fontSize = 12.sp)
+        Text(value, color = CloudWhite, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
     }
 }
 

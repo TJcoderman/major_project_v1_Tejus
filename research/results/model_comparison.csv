@@ -1,0 +1,4 @@
+Model,Accuracy,Precision,Recall,F1 Score,AUC-ROC,EER
+Random Forest,0.9250,0.9250,0.9250,0.9250,0.9812,0.0750
+MLP Neural Network,0.8250,0.7826,0.9000,0.8372,0.9363,0.1375
+One-Class SVM,0.8125,0.9032,0.7000,0.7887,0.9344,0.0625

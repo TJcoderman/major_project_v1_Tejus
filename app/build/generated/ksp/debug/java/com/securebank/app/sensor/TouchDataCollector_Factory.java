@@ -17,7 +17,10 @@ import javax.annotation.processing.Generated;
     "unchecked",
     "rawtypes",
     "KotlinInternal",
-    "KotlinInternalInJava"
+    "KotlinInternalInJava",
+    "cast",
+    "deprecation",
+    "nullness:initialization.field.uninitialized"
 })
 public final class TouchDataCollector_Factory implements Factory<TouchDataCollector> {
   @Override
@@ -34,6 +37,6 @@ public final class TouchDataCollector_Factory implements Factory<TouchDataCollec
   }
 
   private static final class InstanceHolder {
-    private static final TouchDataCollector_Factory INSTANCE = new TouchDataCollector_Factory();
+    static final TouchDataCollector_Factory INSTANCE = new TouchDataCollector_Factory();
   }
 }

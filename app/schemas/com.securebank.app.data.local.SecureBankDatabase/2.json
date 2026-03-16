@@ -1,0 +1,512 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "6431d45b36a4d7f21bf4502ed1575164",
+    "entities": [
+      {
+        "tableName": "users",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`username` TEXT NOT NULL, `passwordHash` TEXT NOT NULL, `fullName` TEXT NOT NULL, `accountNumber` TEXT NOT NULL, `balance` REAL NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`username`))",
+        "fields": [
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "passwordHash",
+            "columnName": "passwordHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fullName",
+            "columnName": "fullName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountNumber",
+            "columnName": "accountNumber",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "balance",
+            "columnName": "balance",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "username"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "transactions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `userId` TEXT NOT NULL, `type` TEXT NOT NULL, `amount` REAL NOT NULL, `recipientAccount` TEXT, `recipientName` TEXT, `description` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `status` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amount",
+            "columnName": "amount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recipientAccount",
+            "columnName": "recipientAccount",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "recipientName",
+            "columnName": "recipientName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "keystroke_data",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `keyCode` INTEGER NOT NULL, `dwellTime` INTEGER NOT NULL, `flightTime` INTEGER NOT NULL, `isLoginBaseline` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "keyCode",
+            "columnName": "keyCode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dwellTime",
+            "columnName": "dwellTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "flightTime",
+            "columnName": "flightTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isLoginBaseline",
+            "columnName": "isLoginBaseline",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "touch_data",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `touchType` TEXT NOT NULL, `startX` REAL NOT NULL, `startY` REAL NOT NULL, `endX` REAL NOT NULL, `endY` REAL NOT NULL, `pressure` REAL NOT NULL, `touchSize` REAL NOT NULL, `duration` INTEGER NOT NULL, `velocity` REAL NOT NULL, `acceleration` REAL NOT NULL, `holdDuration` INTEGER NOT NULL, `touchArea` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "touchType",
+            "columnName": "touchType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startX",
+            "columnName": "startX",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startY",
+            "columnName": "startY",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endX",
+            "columnName": "endX",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endY",
+            "columnName": "endY",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pressure",
+            "columnName": "pressure",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "touchSize",
+            "columnName": "touchSize",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "duration",
+            "columnName": "duration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "velocity",
+            "columnName": "velocity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "acceleration",
+            "columnName": "acceleration",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "holdDuration",
+            "columnName": "holdDuration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "touchArea",
+            "columnName": "touchArea",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "motion_data",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `accelX` REAL NOT NULL, `accelY` REAL NOT NULL, `accelZ` REAL NOT NULL, `gyroX` REAL NOT NULL, `gyroY` REAL NOT NULL, `gyroZ` REAL NOT NULL, `pitch` REAL NOT NULL, `roll` REAL NOT NULL, `azimuth` REAL NOT NULL, `filteredAccelX` REAL NOT NULL, `filteredAccelY` REAL NOT NULL, `filteredAccelZ` REAL NOT NULL, `deviceState` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accelX",
+            "columnName": "accelX",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accelY",
+            "columnName": "accelY",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accelZ",
+            "columnName": "accelZ",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gyroX",
+            "columnName": "gyroX",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gyroY",
+            "columnName": "gyroY",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gyroZ",
+            "columnName": "gyroZ",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pitch",
+            "columnName": "pitch",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roll",
+            "columnName": "roll",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "azimuth",
+            "columnName": "azimuth",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filteredAccelX",
+            "columnName": "filteredAccelX",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filteredAccelY",
+            "columnName": "filteredAccelY",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filteredAccelZ",
+            "columnName": "filteredAccelZ",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceState",
+            "columnName": "deviceState",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "behavioral_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sessionId` TEXT NOT NULL, `userId` TEXT NOT NULL, `startTime` INTEGER NOT NULL, `endTime` INTEGER, `isBaseline` INTEGER NOT NULL, `avgKeystrokeDwellTime` REAL NOT NULL, `avgKeystrokeFlightTime` REAL NOT NULL, `avgTouchPressure` REAL NOT NULL, `avgSwipeVelocity` REAL NOT NULL, `avgDevicePitch` REAL NOT NULL, `avgDeviceRoll` REAL NOT NULL, `stdKeystrokeDwellTime` REAL NOT NULL, `stdKeystrokeFlightTime` REAL NOT NULL, `stdTouchPressure` REAL NOT NULL, `currentRiskScore` REAL NOT NULL, `riskAlertCount` INTEGER NOT NULL, PRIMARY KEY(`sessionId`))",
+        "fields": [
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTime",
+            "columnName": "startTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endTime",
+            "columnName": "endTime",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isBaseline",
+            "columnName": "isBaseline",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgKeystrokeDwellTime",
+            "columnName": "avgKeystrokeDwellTime",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgKeystrokeFlightTime",
+            "columnName": "avgKeystrokeFlightTime",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgTouchPressure",
+            "columnName": "avgTouchPressure",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgSwipeVelocity",
+            "columnName": "avgSwipeVelocity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgDevicePitch",
+            "columnName": "avgDevicePitch",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avgDeviceRoll",
+            "columnName": "avgDeviceRoll",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stdKeystrokeDwellTime",
+            "columnName": "stdKeystrokeDwellTime",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stdKeystrokeFlightTime",
+            "columnName": "stdKeystrokeFlightTime",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stdTouchPressure",
+            "columnName": "stdTouchPressure",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentRiskScore",
+            "columnName": "currentRiskScore",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "riskAlertCount",
+            "columnName": "riskAlertCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sessionId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6431d45b36a4d7f21bf4502ed1575164')"
+    ]
+  }
+}

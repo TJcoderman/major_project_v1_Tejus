@@ -1,0 +1,3 @@
+session_id,participant_id,profile_owner_id,session_type,start_time,end_time,is_complete,is_genuine
+a6a27315-032d-400a-918b-632d7e08ced0,P01,P01,ENROLLMENT,1772090942379,1772091082243,true,true
+a6a27315-032d-400a-918b-632d7e08ced0,P01,P01,ENROLLMENT,1772090942379,1772091083438,true,true

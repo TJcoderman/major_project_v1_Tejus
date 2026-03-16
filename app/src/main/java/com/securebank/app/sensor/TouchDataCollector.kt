@@ -35,8 +35,15 @@ class TouchDataCollector @Inject constructor() {
     private var touchMovePositions = mutableListOf<Pair<Offset, Long>>()
     private var activePointerId: Long? = null
     
-    // Thresholds for touch classification
+    // Hold duration tracking
+    private var stationaryStartTime: Long = 0
+    private var totalHoldDuration: Long = 0
+    private var lastMovePosition: Offset = Offset.Zero
+    private var lastPressure: Float = 0f
+    private var lastSize: Float = 0f
+    
     companion object {
+        private const val STATIONARY_THRESHOLD = 5f  // px movement threshold for "stationary"
         private const val TAP_MAX_DURATION = 200L           // Max duration for a tap (ms)
         private const val LONG_PRESS_MIN_DURATION = 500L    // Min duration for long press (ms)
         private const val SWIPE_MIN_DISTANCE = 50f          // Min distance for swipe (px)
@@ -70,6 +77,13 @@ class TouchDataCollector @Inject constructor() {
         touchStartPosition = position
         touchMovePositions.clear()
         touchMovePositions.add(Pair(position, touchStartTime))
+        
+        // Hold tracking
+        stationaryStartTime = touchStartTime
+        totalHoldDuration = 0
+        lastMovePosition = position
+        lastPressure = pressure
+        lastSize = size
     }
     
     /**
@@ -78,7 +92,19 @@ class TouchDataCollector @Inject constructor() {
     fun onTouchMove(position: Offset) {
         if (!isCollecting) return
         
-        touchMovePositions.add(Pair(position, System.currentTimeMillis()))
+        val now = System.currentTimeMillis()
+        touchMovePositions.add(Pair(position, now))
+        
+        // Track hold duration: accumulate time spent stationary
+        val distFromLast = calculateDistance(lastMovePosition, position)
+        if (distFromLast > STATIONARY_THRESHOLD) {
+            // Finger moved — save any accumulated stationary time
+            if (stationaryStartTime > 0) {
+                totalHoldDuration += now - stationaryStartTime
+            }
+            stationaryStartTime = now
+            lastMovePosition = position
+        }
         
         // Keep only recent positions for velocity calculation
         if (touchMovePositions.size > 20) {
@@ -102,6 +128,16 @@ class TouchDataCollector @Inject constructor() {
         val velocity = calculateVelocity()
         val acceleration = calculateAcceleration()
         
+        // Finalize hold duration
+        if (stationaryStartTime > 0) {
+            totalHoldDuration += touchEndTime - stationaryStartTime
+        }
+        
+        // Compute normalized touch area (pressure × size gives a proxy)
+        val avgPressure = (lastPressure + pressure) / 2f
+        val avgSize = (lastSize + size) / 2f
+        val normalizedArea = avgPressure * avgSize
+        
         // Classify touch type
         val touchType = classifyTouch(duration, distance, velocity, endPosition)
         
@@ -118,7 +154,9 @@ class TouchDataCollector @Inject constructor() {
             touchSize = size,
             duration = duration,
             velocity = velocity,
-            acceleration = acceleration
+            acceleration = acceleration,
+            holdDuration = totalHoldDuration,
+            touchArea = normalizedArea
         )
         
         _touchEvents.emit(touchData)
@@ -270,6 +308,11 @@ class TouchDataCollector @Inject constructor() {
         touchStartPosition = Offset.Zero
         touchMovePositions.clear()
         activePointerId = null
+        stationaryStartTime = 0
+        totalHoldDuration = 0
+        lastMovePosition = Offset.Zero
+        lastPressure = 0f
+        lastSize = 0f
     }
     
     /**

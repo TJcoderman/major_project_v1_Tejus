@@ -43,10 +43,12 @@ data class TouchData(
     val endX: Float,
     val endY: Float,
     val pressure: Float,                 // Touch pressure (0.0 - 1.0)
-    val touchSize: Float,                // Touch area size
+    val touchSize: Float,                // Touch area size from sensor
     val duration: Long,                  // Touch duration (ms)
     val velocity: Float,                 // Calculated velocity for swipes
-    val acceleration: Float = 0f         // Touch acceleration
+    val acceleration: Float = 0f,        // Touch acceleration
+    val holdDuration: Long = 0L,         // Sustained stationary contact time (ms)
+    val touchArea: Float = 0f            // Normalized contact patch area
 )
 
 enum class TouchType {
