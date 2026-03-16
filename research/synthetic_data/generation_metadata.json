@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "generated_at": "2026-03-16T17:28:52.610854",
+  "num_real": 8,
+  "num_synthetic": 50,
+  "genuine_per_participant": 3,
+  "impostor_per_participant": 3,
+  "total_ml_samples_estimate": 316,
+  "pin": "382946"
+}

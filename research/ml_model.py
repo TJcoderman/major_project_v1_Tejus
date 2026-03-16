@@ -40,11 +40,19 @@ def read_csv_data(filepath):
 
 
 def find_session_prefix(participant_dir, session_type):
+    """Find the latest session prefix for a given type."""
     files = sorted([f for f in os.listdir(participant_dir) if f.startswith(session_type)])
     metadata = [f for f in files if f.endswith("_metadata.csv")]
     if not metadata:
         return None
     return metadata[-1].replace("_metadata.csv", "")
+
+
+def find_all_session_prefixes(participant_dir, session_type):
+    """Find ALL session prefixes for a given type (not just the last one)."""
+    files = sorted([f for f in os.listdir(participant_dir) if f.startswith(session_type)])
+    metadata = [f for f in files if f.endswith("_metadata.csv")]
+    return [m.replace("_metadata.csv", "") for m in metadata]
 
 
 def extract_raw_features(participant_dir, prefix):
@@ -174,29 +182,30 @@ def compute_deviation_features(enrollment_feats, session_feats):
 
 
 def build_dataset_v2(data_dir):
-    """Build feature dataset using enrollment-relative deviation features."""
+    """Build feature dataset using enrollment-relative deviation features.
+    Now picks up ALL genuine/impostor sessions per participant (not just the last)."""
     print("\n📊 Building enrollment-relative feature dataset...")
-    
-    participants = sorted([d for d in os.listdir(data_dir) 
+
+    participants = sorted([d for d in os.listdir(data_dir)
                           if os.path.isdir(os.path.join(data_dir, d)) and d.startswith("P")])
-    
+
     samples = []
-    
+
     for pid in participants:
         pdir = os.path.join(data_dir, pid)
-        
-        # Get enrollment features (baseline)
+
+        # Get enrollment features (baseline) - use the last enrollment
         enr_prefix = find_session_prefix(pdir, "enrollment_")
         if not enr_prefix:
             continue
-        
+
         enr_feats = extract_raw_features(pdir, enr_prefix)
         if not enr_feats:
             continue
-        
-        # Process genuine sessions
-        gen_prefix = find_session_prefix(pdir, "genuine_")
-        if gen_prefix:
+
+        # Process ALL genuine sessions
+        gen_prefixes = find_all_session_prefixes(pdir, "genuine_")
+        for gen_prefix in gen_prefixes:
             gen_feats = extract_raw_features(pdir, gen_prefix)
             if gen_feats:
                 dev = compute_deviation_features(enr_feats, gen_feats)
@@ -204,10 +213,10 @@ def build_dataset_v2(data_dir):
                 dev["session_type"] = "genuine"
                 dev["is_genuine"] = 1
                 samples.append(dev)
-        
-        # Process impostor sessions
-        imp_prefix = find_session_prefix(pdir, "impostor_")
-        if imp_prefix:
+
+        # Process ALL impostor sessions
+        imp_prefixes = find_all_session_prefixes(pdir, "impostor_")
+        for imp_prefix in imp_prefixes:
             imp_feats = extract_raw_features(pdir, imp_prefix)
             if imp_feats:
                 dev = compute_deviation_features(enr_feats, imp_feats)
@@ -215,13 +224,13 @@ def build_dataset_v2(data_dir):
                 dev["session_type"] = "impostor"
                 dev["is_genuine"] = 0
                 samples.append(dev)
-    
+
     print(f"  ✅ {len(samples)} samples from {len(participants)} participants")
     df = pd.DataFrame(samples)
     genuine = df["is_genuine"].sum()
     impostor = len(df) - genuine
     print(f"  📈 Genuine: {genuine}, Impostor: {impostor}")
-    
+
     return df
 
 
@@ -321,7 +330,7 @@ def compute_metrics(y_true, y_pred, y_scores, model_name):
 
 def save_results(results):
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    
+
     summary = []
     for key in ["random_forest", "mlp", "one_class_svm"]:
         m = results[key]
@@ -334,27 +343,27 @@ def save_results(results):
             "AUC-ROC": f"{m['roc_auc']:.4f}",
             "EER": f"{m['eer']:.4f}",
         })
-    
+
     summary_df = pd.DataFrame(summary)
     summary_df.to_csv(os.path.join(RESULTS_DIR, "model_comparison.csv"), index=False)
-    
+
     json_results = {}
     for key in ["random_forest", "mlp", "one_class_svm"]:
         m = results[key]
-        json_results[key] = {k: v for k, v in m.items() 
+        json_results[key] = {k: v for k, v in m.items()
                             if k not in ["y_true", "y_pred", "y_scores"]}
-    
+
     if "feature_importance" in results["random_forest"]:
         fi = results["random_forest"]["feature_importance"]
         fi_sorted = sorted(fi, key=lambda x: x[1], reverse=True)
         json_results["feature_importance"] = fi_sorted
-        
+
         fi_df = pd.DataFrame(fi_sorted, columns=["Feature", "Importance"])
         fi_df.to_csv(os.path.join(RESULTS_DIR, "feature_importance.csv"), index=False)
-    
+
     with open(os.path.join(RESULTS_DIR, "detailed_results.json"), "w") as f:
         json.dump(json_results, f, indent=2)
-    
+
     print(f"\n  📄 Results saved to {RESULTS_DIR}")
     print("\n" + "=" * 70)
     print("  MODEL COMPARISON RESULTS (v2 — Enrollment-Relative)")
@@ -363,28 +372,114 @@ def save_results(results):
     print("=" * 70)
 
 
+def export_model_for_android(X, y, feature_names, scaler):
+    """Export the trained MLP model as JSON weights for on-device Kotlin inference.
+
+    This approach avoids TensorFlow/ONNX dependency issues and works on any Python version.
+    The exported JSON contains the MLP layer weights + biases + scaler params.
+    A lightweight Kotlin inference engine (MLModelInference.kt) loads and runs it.
+    """
+    print("\n  Exporting model for Android on-device inference...")
+
+    # Train a final MLP on full data
+    from sklearn.neural_network import MLPClassifier
+
+    X_scaled = scaler.transform(X)
+
+    mlp = MLPClassifier(
+        hidden_layer_sizes=(128, 64, 32),
+        activation="relu",
+        solver="adam",
+        max_iter=1000,
+        random_state=42,
+        early_stopping=True,
+        validation_fraction=0.15,
+        alpha=0.0005
+    )
+    mlp.fit(X_scaled, y)
+
+    train_acc = mlp.score(X_scaled, y)
+    print(f"    Final MLP training accuracy: {train_acc:.4f}")
+
+    # Export weights as JSON
+    model_data = {
+        "model_type": "mlp_binary_classifier",
+        "activation": "relu",
+        "output_activation": "sigmoid",
+        "n_features": int(X.shape[1]),
+        "feature_names": feature_names,
+        "layers": [],
+        "scaler": {
+            "means": scaler.mean_.tolist(),
+            "scales": scaler.scale_.tolist(),
+        },
+        "threshold": 0.5,
+        "training_accuracy": float(train_acc),
+        "training_samples": int(X.shape[0]),
+    }
+
+    for i, (weights, biases) in enumerate(zip(mlp.coefs_, mlp.intercepts_)):
+        model_data["layers"].append({
+            "layer_index": i,
+            "input_size": weights.shape[0],
+            "output_size": weights.shape[1],
+            "weights": weights.tolist(),
+            "biases": biases.tolist(),
+        })
+
+    model_dir = os.path.join(RESULTS_DIR, "android_model")
+    os.makedirs(model_dir, exist_ok=True)
+
+    model_path = os.path.join(model_dir, "behavioral_auth_model.json")
+    with open(model_path, "w") as f:
+        json.dump(model_data, f)
+
+    model_size_kb = os.path.getsize(model_path) / 1024
+    print(f"    Model saved: {model_path} ({model_size_kb:.1f} KB)")
+    print(f"    Layers: {' -> '.join(str(l['output_size']) for l in model_data['layers'])}")
+    print(f"    Copy to: app/src/main/assets/ml/behavioral_auth_model.json")
+
+    return model_path
+
+
 def main():
     print("=" * 70)
     print("  ML MODEL PIPELINE v2 — Enrollment-Relative Authentication")
     print("=" * 70)
-    
+
     data_dir = SYNTHETIC_DATA_DIR if os.path.exists(SYNTHETIC_DATA_DIR) else REAL_DATA_DIR
     print(f"\n  Dataset: {data_dir}")
-    
+
     df = build_dataset_v2(data_dir)
-    
+
     if len(df) < 10:
         print("❌ Not enough data! Run synthetic_data_generator.py first.")
         return
-    
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
     df.to_csv(os.path.join(RESULTS_DIR, "feature_dataset.csv"), index=False)
     print(f"  💾 Saved: {len(df)} samples × {len(df.columns) - 3} features")
-    
+
     results = train_models_v2(df)
     save_results(results)
-    
-    print("\n✅ Run generate_visualizations.py to update figures.")
+
+    # Export TFLite model for Android
+    X = results["X_scaled"]
+    y = results["y"]
+    feature_names = results["feature_names"]
+
+    # Reconstruct scaler from the scaled data
+    feature_cols = [c for c in df.columns if c not in ["participant_id", "session_type", "is_genuine"]]
+    X_raw = df[feature_cols].fillna(0).values
+    non_const = np.std(X_raw, axis=0) > 1e-8
+    X_raw = X_raw[:, non_const]
+
+    scaler = StandardScaler()
+    scaler.fit(X_raw)
+
+    export_model_for_android(X_raw, y, feature_names, scaler)
+
+    print("\n✅ Pipeline complete! Run generate_visualizations.py to update figures.")
 
 
 if __name__ == "__main__":

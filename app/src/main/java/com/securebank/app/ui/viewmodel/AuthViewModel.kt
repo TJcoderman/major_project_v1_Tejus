@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.securebank.app.data.model.AuthState
 import com.securebank.app.data.model.BehavioralSession
 import com.securebank.app.data.model.KeystrokeData
+import com.securebank.app.data.model.PinKeystrokeEvent
 import com.securebank.app.data.model.User
 import com.securebank.app.data.repository.BehavioralRepository
 import com.securebank.app.data.repository.UserRepository
@@ -121,6 +122,29 @@ class AuthViewModel @Inject constructor(
                 
                 // Initialize behavior analyzer with baseline
                 behaviorAnalyzer.initializeBaseline(sessionId)
+
+                // Set ML enrollment baseline from login keystrokes
+                val baselineKs = keystrokeCollector.getBaselineKeystrokes()
+                if (baselineKs.size >= 6) {
+                    val pinEvents = baselineKs.mapIndexed { index, ks ->
+                        PinKeystrokeEvent(
+                            sessionId = sessionId,
+                            timestamp = ks.timestamp,
+                            digit = index % 10,
+                            keyDownTime = ks.timestamp,
+                            keyUpTime = ks.timestamp + ks.dwellTime,
+                            dwellTime = ks.dwellTime,
+                            flightTime = ks.flightTime,
+                            touchX = 0f,
+                            touchY = 0f,
+                            touchSize = 0f,
+                            pinAttemptNumber = 1
+                        )
+                    }
+                    val recentTouches = behavioralRepository.getRecentTouches(sessionId, 200)
+                    val recentMotion = behavioralRepository.getRecentMotion(sessionId, 500)
+                    behaviorAnalyzer.setMLEnrollmentBaseline(pinEvents, recentTouches, recentMotion)
+                }
                 
                 _authState.value = AuthState(
                     isAuthenticated = true,
