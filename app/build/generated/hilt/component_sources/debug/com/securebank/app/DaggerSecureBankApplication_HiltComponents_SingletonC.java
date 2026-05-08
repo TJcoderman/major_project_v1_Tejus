@@ -25,6 +25,8 @@ import com.securebank.app.di.AppModule_ProvideTransactionDaoFactory;
 import com.securebank.app.di.AppModule_ProvideUserDaoFactory;
 import com.securebank.app.domain.BehaviorAnalyzer;
 import com.securebank.app.domain.FeatureExtractor;
+import com.securebank.app.domain.MLFeatureExtractor;
+import com.securebank.app.domain.MLModelInference;
 import com.securebank.app.sensor.KeystrokeCollector;
 import com.securebank.app.sensor.SensorDataCollector;
 import com.securebank.app.sensor.TouchDataCollector;
@@ -599,6 +601,10 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
 
     Provider<KeystrokeCollector> keystrokeCollectorProvider;
 
+    Provider<MLModelInference> mLModelInferenceProvider;
+
+    Provider<MLFeatureExtractor> mLFeatureExtractorProvider;
+
     Provider<BehaviorAnalyzer> behaviorAnalyzerProvider;
 
     Provider<DataExporter> dataExporterProvider;
@@ -625,9 +631,11 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
       this.provideBehavioralSessionDaoProvider = DoubleCheck.provider(new SwitchingProvider<BehavioralSessionDao>(singletonCImpl, 10));
       this.behavioralRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<BehavioralRepository>(singletonCImpl, 6));
       this.keystrokeCollectorProvider = DoubleCheck.provider(new SwitchingProvider<KeystrokeCollector>(singletonCImpl, 11));
+      this.mLModelInferenceProvider = DoubleCheck.provider(new SwitchingProvider<MLModelInference>(singletonCImpl, 13));
+      this.mLFeatureExtractorProvider = DoubleCheck.provider(new SwitchingProvider<MLFeatureExtractor>(singletonCImpl, 14));
       this.behaviorAnalyzerProvider = DoubleCheck.provider(new SwitchingProvider<BehaviorAnalyzer>(singletonCImpl, 12));
-      this.dataExporterProvider = DoubleCheck.provider(new SwitchingProvider<DataExporter>(singletonCImpl, 13));
-      this.featureExtractorProvider = DoubleCheck.provider(new SwitchingProvider<FeatureExtractor>(singletonCImpl, 14));
+      this.dataExporterProvider = DoubleCheck.provider(new SwitchingProvider<DataExporter>(singletonCImpl, 15));
+      this.featureExtractorProvider = DoubleCheck.provider(new SwitchingProvider<FeatureExtractor>(singletonCImpl, 16));
     }
 
     @Override
@@ -700,12 +708,18 @@ public final class DaggerSecureBankApplication_HiltComponents_SingletonC {
           return (T) new KeystrokeCollector();
 
           case 12: // com.securebank.app.domain.BehaviorAnalyzer
-          return (T) new BehaviorAnalyzer(singletonCImpl.behavioralRepositoryProvider.get(), singletonCImpl.keystrokeCollectorProvider.get());
+          return (T) new BehaviorAnalyzer(singletonCImpl.behavioralRepositoryProvider.get(), singletonCImpl.keystrokeCollectorProvider.get(), singletonCImpl.mLModelInferenceProvider.get(), singletonCImpl.mLFeatureExtractorProvider.get());
 
-          case 13: // com.securebank.app.data.export.DataExporter
+          case 13: // com.securebank.app.domain.MLModelInference
+          return (T) new MLModelInference(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule));
+
+          case 14: // com.securebank.app.domain.MLFeatureExtractor
+          return (T) new MLFeatureExtractor();
+
+          case 15: // com.securebank.app.data.export.DataExporter
           return (T) new DataExporter(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule), singletonCImpl.behavioralRepositoryProvider.get());
 
-          case 14: // com.securebank.app.domain.FeatureExtractor
+          case 16: // com.securebank.app.domain.FeatureExtractor
           return (T) new FeatureExtractor();
 
           default: throw new AssertionError(id);

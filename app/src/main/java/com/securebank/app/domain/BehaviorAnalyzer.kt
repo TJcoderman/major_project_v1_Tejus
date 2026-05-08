@@ -64,6 +64,12 @@ class BehaviorAnalyzer @Inject constructor(
     
     private val _riskAssessment = MutableSharedFlow<RiskAssessment>(replay = 1)
     val riskAssessment: SharedFlow<RiskAssessment> = _riskAssessment.asSharedFlow()
+
+    private val _mlReadyState = MutableStateFlow(false)
+    val mlReadyState: StateFlow<Boolean> = _mlReadyState.asStateFlow()
+
+    private val _debugExplainabilityState = MutableStateFlow(DebugExplainabilityState())
+    val debugExplainabilityState: StateFlow<DebugExplainabilityState> = _debugExplainabilityState.asStateFlow()
     
     // Baseline metrics (from login)
     private var baselineKeystrokeDwell: Float = 0f
@@ -75,6 +81,13 @@ class BehaviorAnalyzer @Inject constructor(
     private var baselineDevicePitch: Float = 0f
     private var baselineDeviceRoll: Float = 0f
     private var baselineDeviceState: DeviceState = DeviceState.UNKNOWN
+    private var latestKeystrokeDwell: Float = 0f
+    private var latestKeystrokeFlight: Float = 0f
+    private var latestTouchPressure: Float = 0f
+    private var latestSwipeVelocity: Float = 0f
+    private var latestDevicePitch: Float = 0f
+    private var latestDeviceRoll: Float = 0f
+    private var latestDeviceState: DeviceState? = null
     
     // Session tracking
     private var currentSessionId: String = ""
@@ -83,6 +96,10 @@ class BehaviorAnalyzer @Inject constructor(
     // ML model state
     private var mlModelLoaded = false
     private var mlEnrollmentReady = false
+    private var lastMLPrediction = "Not evaluated"
+    private var lastMLConfidence: Float? = null
+    private var lastMLRisk: Float? = null
+    private var lastExtractedFeatureCount = 0
     
     /**
      * Initializes the analyzer with baseline data from login.
@@ -120,6 +137,14 @@ class BehaviorAnalyzer @Inject constructor(
 
         // Initialize ML model
         initializeMLModel()
+        publishDebugState(
+            sessionState = "Baseline initialized",
+            decision = "Monitoring started",
+            reason = "Login keystroke baseline is ready. Touch and motion baselines will update after live data arrives.",
+            riskScore = 0f,
+            riskLevel = RiskLevel.LOW,
+            recommendation = SecurityRecommendation.CONTINUE
+        )
     }
 
     /**
@@ -135,6 +160,7 @@ class BehaviorAnalyzer @Inject constructor(
                 Log.w(TAG, "ML model failed to load - falling back to Z-score only")
             }
         }
+        updateMLReadyState()
     }
 
     /**
@@ -150,7 +176,10 @@ class BehaviorAnalyzer @Inject constructor(
         touches: List<TouchData>,
         motionData: List<MotionData>
     ) {
-        if (!mlModelLoaded) return
+        if (!mlModelLoaded) {
+            updateMLReadyState()
+            return
+        }
 
         mlFeatureExtractor.setEnrollmentBaseline(pinKeystrokes, touches, motionData)
         mlEnrollmentReady = mlFeatureExtractor.hasEnrollmentBaseline()
@@ -160,6 +189,7 @@ class BehaviorAnalyzer @Inject constructor(
         } else {
             Log.w(TAG, "ML enrollment baseline could not be established - insufficient data")
         }
+        updateMLReadyState()
     }
 
     private fun calculateStdDev(values: List<Float>, mean: Float): Float {
@@ -183,6 +213,15 @@ class BehaviorAnalyzer @Inject constructor(
         if (avgPitch != 0f) baselineDevicePitch = avgPitch
         if (avgRoll != 0f) baselineDeviceRoll = avgRoll
         if (commonState != null) baselineDeviceState = commonState
+
+        publishDebugState(
+            sessionState = "Monitoring",
+            decision = "Touch and motion baseline updated",
+            reason = "Initial live touch and motion samples have been folded into the session baseline.",
+            riskScore = _currentRiskScore.value,
+            riskLevel = _currentRiskLevel.value,
+            recommendation = SecurityRecommendation.CONTINUE
+        )
     }
     
     /**
@@ -196,6 +235,10 @@ class BehaviorAnalyzer @Inject constructor(
      */
     suspend fun performRiskAssessment(sessionId: String): RiskAssessment {
         analysisCount++
+        lastMLPrediction = "Not evaluated"
+        lastMLConfidence = null
+        lastMLRisk = null
+        lastExtractedFeatureCount = 0
 
         val anomalies = mutableListOf<BehavioralAnomaly>()
 
@@ -244,6 +287,21 @@ class BehaviorAnalyzer @Inject constructor(
         // Update state
         _currentRiskScore.value = overallRiskScore
         _currentRiskLevel.value = riskLevel
+        publishDebugState(
+            sessionState = "Risk assessment #$analysisCount",
+            decision = recommendation.name.replace('_', ' '),
+            reason = buildDecisionReason(riskLevel, recommendation, anomalies),
+            riskScore = overallRiskScore,
+            riskLevel = riskLevel,
+            recommendation = recommendation,
+            keystrokeDeviation = keystrokeDeviation,
+            touchDeviation = touchDeviation,
+            motionDeviation = motionDeviation,
+            zScoreRisk = zScoreRisk,
+            mlRisk = mlRisk,
+            anomalies = anomalies,
+            timestamp = assessment.timestamp
+        )
         _riskAssessment.emit(assessment)
 
         return assessment
@@ -253,6 +311,11 @@ class BehaviorAnalyzer @Inject constructor(
      * Runs the ML model on current session data vs enrollment baseline.
      * Returns an impostor risk score (0.0 = genuine, 1.0 = impostor),
      * or null if ML is not available.
+     *
+     * NOTE: The banking demo does not use CustomPinPad for login, so real PIN
+     * keystroke features are unavailable. ML enrollment requires the experiment
+     * module. When mlEnrollmentReady is false, this returns null and the system
+     * falls back to statistical Z-score detection only.
      */
     private suspend fun performMLAssessment(
         sessionId: String,
@@ -264,9 +327,21 @@ class BehaviorAnalyzer @Inject constructor(
         val recentTouches = behavioralRepository.getRecentTouches(sessionId, 200)
         val recentMotion = behavioralRepository.getRecentMotion(sessionId, 500)
 
-        // Convert login keystrokes to PinKeystrokeEvent format for ML
-        val baselineKeystrokes = keystrokeCollector.getBaselineKeystrokes()
-        val pinKeystrokes = baselineKeystrokes.mapIndexed { index, ks ->
+        // Use recent non-baseline keystrokes from the DB as "current" session data.
+        // Previously this incorrectly used getBaselineKeystrokes() which compared
+        // enrollment data against itself.
+        val recentKeystrokes = behavioralRepository.getRecentKeystrokeMetrics(
+            sessionId, ANALYSIS_WINDOW, MIN_KEYSTROKE_SAMPLES
+        )
+        // If no recent keystrokes, we cannot compute deviation features for ML
+        if (recentKeystrokes == null || recentMotion.size < 50) return null
+
+        // Build synthetic PinKeystrokeEvent from recent non-baseline keystrokes
+        // for feature extraction compatibility. These are typed during banking use.
+        val recentKeystrokeData = behavioralRepository.getRecentKeystrokeData(
+            sessionId, ANALYSIS_WINDOW
+        )
+        val pinKeystrokes = recentKeystrokeData.mapIndexed { index, ks ->
             PinKeystrokeEvent(
                 sessionId = sessionId,
                 timestamp = ks.timestamp,
@@ -282,21 +357,31 @@ class BehaviorAnalyzer @Inject constructor(
             )
         }
 
-        if (pinKeystrokes.size < 6 || recentMotion.size < 50) return null
+        if (pinKeystrokes.size < 6) return null
 
         val featureOrder = mlModelInference.getFeatureNames()
         val features = mlFeatureExtractor.computeDeviationFeatures(
             pinKeystrokes, recentTouches, recentMotion, featureOrder
         ) ?: return null
+        lastExtractedFeatureCount = features.size
 
-        val (isGenuine, confidence) = mlModelInference.classify(features)
+        // classify() now returns null on model failure instead of fail-open
+        val classifyResult = mlModelInference.classify(features) ?: run {
+            lastMLPrediction = "Unavailable"
+            lastMLConfidence = null
+            return null
+        }
+        val (isGenuine, confidence) = classifyResult
+        lastMLPrediction = if (isGenuine) "Genuine" else "Impostor"
+        lastMLConfidence = confidence
 
         // Convert to risk score: genuine=low risk, impostor=high risk
         val mlRiskScore = if (isGenuine) {
-            (1f - confidence).coerceIn(0f, 0.3f) // Genuine with confidence → low risk
+            (1f - confidence).coerceIn(0f, 0.3f) // Genuine with confidence -> low risk
         } else {
-            confidence.coerceIn(0.5f, 1f) // Impostor with confidence → high risk
+            confidence.coerceIn(0.5f, 1f) // Impostor with confidence -> high risk
         }
+        lastMLRisk = mlRiskScore
 
         // Add anomaly if ML detects impostor
         if (!isGenuine && confidence > 0.7f) {
@@ -321,7 +406,17 @@ class BehaviorAnalyzer @Inject constructor(
         sessionId: String,
         anomalies: MutableList<BehavioralAnomaly>
     ): Float {
-        val (avgDwell, avgFlight) = behavioralRepository.getAverageKeystrokeMetrics(sessionId, false)
+        // Use recent windowed metrics with minimum sample gate
+        val recentMetrics = behavioralRepository.getRecentKeystrokeMetrics(
+            sessionId, ANALYSIS_WINDOW, MIN_KEYSTROKE_SAMPLES
+        )
+        if (recentMetrics == null) {
+            // Insufficient data — mark as unavailable, do not contribute deviation
+            return 0f
+        }
+        val (avgDwell, avgFlight) = recentMetrics
+        latestKeystrokeDwell = avgDwell
+        latestKeystrokeFlight = avgFlight
         
         // Skip if not enough baseline data
         if (baselineKeystrokeDwell <= 0 || avgDwell <= 0) {
@@ -372,7 +467,17 @@ class BehaviorAnalyzer @Inject constructor(
         sessionId: String,
         anomalies: MutableList<BehavioralAnomaly>
     ): Float {
-        val (avgPressure, avgVelocity) = behavioralRepository.getAverageTouchMetrics(sessionId)
+        // Use recent windowed metrics with minimum sample gate
+        val recentMetrics = behavioralRepository.getRecentTouchMetrics(
+            sessionId, ANALYSIS_WINDOW, MIN_TOUCH_SAMPLES
+        )
+        if (recentMetrics == null) {
+            // Insufficient data — mark as unavailable, do not contribute deviation
+            return 0f
+        }
+        val (avgPressure, avgVelocity) = recentMetrics
+        latestTouchPressure = avgPressure
+        latestSwipeVelocity = avgVelocity
         
         // Skip if no data
         if (avgPressure <= 0 && avgVelocity <= 0) {
@@ -428,7 +533,18 @@ class BehaviorAnalyzer @Inject constructor(
         sessionId: String,
         anomalies: MutableList<BehavioralAnomaly>
     ): Float {
-        val (avgPitch, avgRoll, currentState) = behavioralRepository.getAverageMotionMetrics(sessionId)
+        // Use recent windowed metrics with minimum sample gate
+        val recentMetrics = behavioralRepository.getRecentMotionMetrics(
+            sessionId, ANALYSIS_WINDOW, MIN_MOTION_SAMPLES
+        )
+        if (recentMetrics == null) {
+            // Insufficient data — mark as unavailable, do not contribute deviation
+            return 0f
+        }
+        val (avgPitch, avgRoll, currentState) = recentMetrics
+        latestDevicePitch = avgPitch
+        latestDeviceRoll = avgRoll
+        latestDeviceState = currentState
         
         var totalDeviation = 0f
         var deviationCount = 0
@@ -622,7 +738,148 @@ class BehaviorAnalyzer @Inject constructor(
             else -> RiskLevel.LOW
         }
     }
-    
+
+    fun applyDebugScenario(label: String, riskScore: Float) {
+        val safeScore = riskScore.coerceIn(0f, 1f)
+        val riskLevel = determineRiskLevel(safeScore)
+        val anomaly = BehavioralAnomaly(
+            type = AnomalyType.UNUSUAL_INTERACTION_PATTERN,
+            severity = safeScore,
+            description = "Demo scenario: $label"
+        )
+        val anomalies = if (safeScore > LOW_THRESHOLD) listOf(anomaly) else emptyList()
+        val recommendation = determineRecommendation(riskLevel, anomalies)
+
+        _currentRiskScore.value = safeScore
+        _currentRiskLevel.value = riskLevel
+        publishDebugState(
+            sessionState = "Demo simulation",
+            decision = recommendation.name.replace('_', ' '),
+            reason = "Reviewer demo override applied: $label.",
+            riskScore = safeScore,
+            riskLevel = riskLevel,
+            recommendation = recommendation,
+            keystrokeDeviation = if ("typing" in label.lowercase() || "critical" in label.lowercase()) safeScore else 0f,
+            touchDeviation = if ("touch" in label.lowercase() || "critical" in label.lowercase()) safeScore else 0f,
+            motionDeviation = if ("motion" in label.lowercase() || "critical" in label.lowercase()) safeScore else 0f,
+            zScoreRisk = safeScore,
+            mlRisk = null,
+            anomalies = anomalies,
+            timestamp = System.currentTimeMillis()
+        )
+    }
+
+    private fun publishDebugState(
+        sessionState: String,
+        decision: String,
+        reason: String,
+        riskScore: Float,
+        riskLevel: RiskLevel,
+        recommendation: SecurityRecommendation,
+        keystrokeDeviation: Float = 0f,
+        touchDeviation: Float = 0f,
+        motionDeviation: Float = 0f,
+        zScoreRisk: Float = 0f,
+        mlRisk: Float? = lastMLRisk,
+        anomalies: List<BehavioralAnomaly> = emptyList(),
+        timestamp: Long? = null
+    ) {
+        _debugExplainabilityState.value = DebugExplainabilityState(
+            sessionState = sessionState,
+            decision = decision,
+            reason = reason,
+            riskScore = riskScore,
+            riskLevel = riskLevel,
+            recommendation = recommendation,
+            zScoreRisk = zScoreRisk,
+            mlRisk = mlRisk,
+            mlPrediction = lastMLPrediction,
+            mlConfidence = lastMLConfidence,
+            modelLoaded = mlModelLoaded,
+            enrollmentReady = mlEnrollmentReady,
+            expectedFeatureCount = mlModelInference.getExpectedFeatureCount(),
+            extractedFeatureCount = lastExtractedFeatureCount,
+            contributions = listOf(
+                DebugRiskContribution("Keystroke", keystrokeDeviation, KEYSTROKE_WEIGHT, keystrokeDeviation * KEYSTROKE_WEIGHT),
+                DebugRiskContribution("Touch", touchDeviation, TOUCH_WEIGHT, touchDeviation * TOUCH_WEIGHT),
+                DebugRiskContribution("Motion", motionDeviation, MOTION_WEIGHT, motionDeviation * MOTION_WEIGHT)
+            ),
+            comparisons = buildMetricComparisons(),
+            anomalies = anomalies,
+            lastAssessmentTimestamp = timestamp
+        )
+    }
+
+    private fun buildMetricComparisons(): List<DebugMetricComparison> {
+        return listOf(
+            DebugMetricComparison(
+                label = "Keystroke dwell",
+                baseline = formatMs(baselineKeystrokeDwell),
+                current = formatMs(latestKeystrokeDwell),
+                deviation = formatRelativeDeviation(latestKeystrokeDwell, baselineKeystrokeDwell)
+            ),
+            DebugMetricComparison(
+                label = "Keystroke flight",
+                baseline = formatMs(baselineKeystrokeFlight),
+                current = formatMs(latestKeystrokeFlight),
+                deviation = formatRelativeDeviation(latestKeystrokeFlight, baselineKeystrokeFlight)
+            ),
+            DebugMetricComparison(
+                label = "Touch pressure",
+                baseline = "%.2f".format(baselineTouchPressure),
+                current = "%.2f".format(latestTouchPressure),
+                deviation = formatRelativeDeviation(latestTouchPressure, baselineTouchPressure)
+            ),
+            DebugMetricComparison(
+                label = "Swipe velocity",
+                baseline = "%.0f px/s".format(baselineSwipeVelocity),
+                current = "%.0f px/s".format(latestSwipeVelocity),
+                deviation = formatRelativeDeviation(latestSwipeVelocity, baselineSwipeVelocity)
+            ),
+            DebugMetricComparison(
+                label = "Device pitch",
+                baseline = "%.1f deg".format(baselineDevicePitch),
+                current = "%.1f deg".format(latestDevicePitch),
+                deviation = "%+.1f deg".format(latestDevicePitch - baselineDevicePitch)
+            ),
+            DebugMetricComparison(
+                label = "Device roll",
+                baseline = "%.1f deg".format(baselineDeviceRoll),
+                current = "%.1f deg".format(latestDeviceRoll),
+                deviation = "%+.1f deg".format(latestDeviceRoll - baselineDeviceRoll)
+            ),
+            DebugMetricComparison(
+                label = "Device state",
+                baseline = baselineDeviceState.name,
+                current = latestDeviceState?.name ?: "UNKNOWN",
+                deviation = if (latestDeviceState == baselineDeviceState) "same" else "changed"
+            )
+        )
+    }
+
+    private fun buildDecisionReason(
+        riskLevel: RiskLevel,
+        recommendation: SecurityRecommendation,
+        anomalies: List<BehavioralAnomaly>
+    ): String {
+        if (anomalies.isEmpty()) {
+            return "All monitored signals are close enough to the enrolled baseline. Recommended action: ${recommendation.name.replace('_', ' ')}."
+        }
+        val topReasons = anomalies
+            .sortedByDescending { it.severity }
+            .take(3)
+            .joinToString("; ") { it.description }
+        return "$riskLevel risk because $topReasons. Recommended action: ${recommendation.name.replace('_', ' ')}."
+    }
+
+    private fun formatMs(value: Float): String = if (value > 0f) "%.0f ms".format(value) else "--"
+
+    private fun formatRelativeDeviation(current: Float, baseline: Float): String {
+        if (baseline <= 0f || current <= 0f) return "--"
+        val relative = ((current - baseline) / baseline) * 100f
+        return "%+.0f%%".format(relative)
+    }
+     
     /**
      * Resets the analyzer state (call on logout).
      */
@@ -636,17 +893,37 @@ class BehaviorAnalyzer @Inject constructor(
         baselineDevicePitch = 45f
         baselineDeviceRoll = 0f
         baselineDeviceState = DeviceState.UNKNOWN
+        latestKeystrokeDwell = 0f
+        latestKeystrokeFlight = 0f
+        latestTouchPressure = 0f
+        latestSwipeVelocity = 0f
+        latestDevicePitch = 0f
+        latestDeviceRoll = 0f
+        latestDeviceState = null
         _currentRiskScore.value = 0f
         _currentRiskLevel.value = RiskLevel.LOW
 
         // Clear ML state
         mlFeatureExtractor.clearBaseline()
         mlEnrollmentReady = false
+        lastMLPrediction = "Not evaluated"
+        lastMLConfidence = null
+        lastMLRisk = null
+        lastExtractedFeatureCount = 0
+        updateMLReadyState()
+        _debugExplainabilityState.value = DebugExplainabilityState(
+            modelLoaded = mlModelLoaded,
+            expectedFeatureCount = mlModelInference.getExpectedFeatureCount()
+        )
     }
 
     /**
      * Returns whether the ML model is loaded and enrollment baseline is set.
      */
     fun isMLReady(): Boolean = mlModelLoaded && mlEnrollmentReady
+
+    private fun updateMLReadyState() {
+        _mlReadyState.value = isMLReady()
+    }
 }
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">SecureBank</string>
+    <string name="app_name">SecureBank Dev</string>
     
     <!-- Authentication -->
     <string name="login_title">Welcome Back</string>

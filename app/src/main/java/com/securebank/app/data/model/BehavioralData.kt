@@ -228,6 +228,16 @@ enum class SecurityRecommendation {
     FORCE_LOGOUT        // Immediately terminate session
 }
 
+/**
+ * Models the severity of a security alert dialog.
+ * Determines which actions the user is allowed to take.
+ */
+enum class AlertSeverity {
+    CRITICAL,  // Non-dismissible, logout only
+    HIGH,      // Must verify identity (re-auth)
+    MEDIUM     // Warning, user may continue
+}
+
 data class BehavioralAnomaly(
     val type: AnomalyType,
     val severity: Float,
@@ -243,6 +253,49 @@ enum class AnomalyType {
     DEVICE_STATE_CHANGE,
     UNUSUAL_INTERACTION_PATTERN
 }
+
+data class DebugRiskContribution(
+    val signal: String,
+    val deviation: Float,
+    val weight: Float,
+    val contribution: Float
+)
+
+data class DebugMetricComparison(
+    val label: String,
+    val baseline: String,
+    val current: String,
+    val deviation: String
+)
+
+data class DebugExplainabilityState(
+    val sessionState: String = "Waiting for login",
+    val decision: String = "No risk decision yet",
+    val reason: String = "Behavioral collection has not produced an assessment.",
+    val riskScore: Float = 0f,
+    val riskLevel: RiskLevel = RiskLevel.LOW,
+    val recommendation: SecurityRecommendation = SecurityRecommendation.CONTINUE,
+    val zScoreRisk: Float = 0f,
+    val mlRisk: Float? = null,
+    val mlPrediction: String = "Not evaluated",
+    val mlConfidence: Float? = null,
+    val modelLoaded: Boolean = false,
+    val enrollmentReady: Boolean = false,
+    val expectedFeatureCount: Int = 0,
+    val extractedFeatureCount: Int = 0,
+    val contributions: List<DebugRiskContribution> = emptyList(),
+    val comparisons: List<DebugMetricComparison> = emptyList(),
+    val anomalies: List<BehavioralAnomaly> = emptyList(),
+    val lastAssessmentTimestamp: Long? = null
+)
+
+data class DebugCollectionCounters(
+    val keystrokes: Int = 0,
+    val touches: Int = 0,
+    val motionSamples: Int = 0,
+    val databaseWrites: Int = 0,
+    val lastEventTimestamp: Long? = null
+)
 
 /**
  * Type converter for TouchType enum

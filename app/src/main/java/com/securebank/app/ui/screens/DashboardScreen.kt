@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.securebank.app.data.model.DebugCollectionCounters
+import com.securebank.app.data.model.DebugExplainabilityState
 import com.securebank.app.data.model.KeystrokeData
 import com.securebank.app.data.model.MotionData
 import com.securebank.app.data.model.RiskLevel
@@ -54,6 +56,10 @@ fun DashboardScreen(
     riskScore: Float,
     riskLevel: RiskLevel,
     debugMode: Boolean,
+    isMLReady: Boolean = false,
+    debugExplainabilityState: DebugExplainabilityState = DebugExplainabilityState(),
+    debugCounters: DebugCollectionCounters = DebugCollectionCounters(),
+    debugEvents: List<String> = emptyList(),
     liveMotionData: MotionData? = null,
     liveTouchData: TouchData? = null,
     liveKeystrokeData: KeystrokeData? = null,
@@ -61,7 +67,12 @@ fun DashboardScreen(
     onTransferClick: () -> Unit,
     onResearchClick: () -> Unit = {},
     onLogout: () -> Unit,
-    onToggleDebug: () -> Unit
+    onToggleDebug: () -> Unit,
+    onSimulateTypingAnomaly: () -> Unit = {},
+    onSimulateTouchAnomaly: () -> Unit = {},
+    onSimulateMotionAnomaly: () -> Unit = {},
+    onSimulateCriticalRisk: () -> Unit = {},
+    onResetDemoRisk: () -> Unit = {}
 ) {
     val currencyFormat = remember { NumberFormat.getCurrencyInstance(Locale("en", "IN")) }
     
@@ -171,7 +182,7 @@ fun DashboardScreen(
                     
                     // Bottom padding for debug panel
                     item {
-                        Spacer(modifier = Modifier.height(if (debugMode) 160.dp else 16.dp))
+                        Spacer(modifier = Modifier.height(if (debugMode) 460.dp else 16.dp))
                     }
                 }
                 
@@ -180,10 +191,19 @@ fun DashboardScreen(
                     riskScore = riskScore,
                     riskLevel = riskLevel,
                     isVisible = debugMode,
+                    isMLReady = isMLReady,
+                    explainabilityState = debugExplainabilityState,
+                    counters = debugCounters,
+                    events = debugEvents,
                     motionData = liveMotionData,
                     touchData = liveTouchData,
                     keystrokeData = liveKeystrokeData,
                     onToggle = onToggleDebug,
+                    onSimulateTypingAnomaly = onSimulateTypingAnomaly,
+                    onSimulateTouchAnomaly = onSimulateTouchAnomaly,
+                    onSimulateMotionAnomaly = onSimulateMotionAnomaly,
+                    onSimulateCriticalRisk = onSimulateCriticalRisk,
+                    onResetDemoRisk = onResetDemoRisk,
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
             }

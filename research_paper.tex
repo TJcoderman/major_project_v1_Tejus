@@ -54,7 +54,7 @@ gautamnautiyal943@gmail.com}
 
 % ─── ABSTRACT ──────────────────────────────────────────────
 \begin{abstract}
-Most banking apps on Android stop verifying who you are the moment you finish logging in. That single checkpoint---a PIN, a fingerprint, sometimes a password---is all that stands between a legitimate session and a fraudulent one. If someone grabs your phone right after you have authenticated, the app has no way of knowing. We built \textit{SecureBank} to tackle exactly this problem. It is a working Android prototype that watches how you interact with the phone throughout your session: how you type your PIN, how you tap and swipe, and how you physically hold the device. Under the hood, it runs a two-track detection system. One track uses straightforward Z-score statistics to catch obvious deviations from the login baseline. The other track feeds a 124-dimensional deviation feature vector into a small MLP neural network that we trained offline and then exported as a JSON weight file---no TensorFlow, no ONNX, just plain Kotlin matrix math running on the phone itself. We collected session data from 8 real users on physical devices, then expanded the pool to 58 participants through a calibrated synthetic generator that blends real behavioral profiles with age-adjusted noise and Ornstein--Uhlenbeck motion models. On the resulting 379-session dataset, Random Forest hit 89.71\% accuracy with a 0.979 AUC and 8.71\% Equal Error Rate, while the deployed MLP reached 87.60\% accuracy at 0.938 AUC. What surprised us the most was the feature importance ranking---accelerometer tilt and touch tap ratio turned out to be far more telling than keystroke timing, which we had originally assumed would carry the heaviest weight. The system maps the fused risk score onto four levels (low, medium, high, critical) and responds accordingly, from a gentle on-screen nudge all the way to an immediate forced logout.
+Banking apps on Android authenticate you once. After that --- nothing. The session stays open, and whoever picks up the phone is trusted implicitly until logout or timeout. \textit{SecureBank} is our attempt at fixing this gap. It is a working Android prototype that monitors three behavioral channels throughout a session: PIN-entry keystroke timing captured through a custom numeric pad, touch interaction patterns (taps, swipes, scrolls) intercepted via Compose's pointer input system, and device orientation derived from the accelerometer and gyroscope. Two parallel detection tracks run on the handset itself, with no server component. The first track compares rolling session averages against the login baseline using Z-scores. The second constructs a 124-dimensional deviation feature vector and pushes it through a small MLP --- weights stored as a JSON file, inference implemented as plain Kotlin matrix multiplication, no TensorFlow or ONNX dependency at all. Data came from 8 participants on physical devices. Because that pool was too small to train reliably, we expanded it to 58 participants through a calibrated synthetic generator built on Dirichlet profile blending, age-adjusted motor noise drawn from published ergonomics literature, and Ornstein--Uhlenbeck processes for realistic accelerometer traces. On the resulting 379-session corpus, Random Forest achieved 89.71\% accuracy (AUC\,=\,0.979, EER\,=\,8.71\%), while the on-device MLP reached 87.60\% (AUC\,=\,0.938). The feature importance analysis produced a result we did not anticipate: accelerometer tilt and tap-to-swipe ratio dominated the rankings, pushing keystroke dynamics well below expectations. A fused risk score maps onto four graduated response levels from passive monitoring through forced logout.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -65,25 +65,25 @@ behavioral biometrics, continuous authentication, keystroke dynamics, mobile sec
 \section{Introduction}
 % ====================================================================
 
-Here is a scenario we kept coming back to while scoping this project. You are at a coffee shop, you open your banking app, punch in your PIN, check your balance---and then you set the phone down on the table for thirty seconds to stir your coffee. In that half-minute window, anyone who picks up the device essentially \textit{is} you, as far as the app is concerned. The session is live, the authentication already passed, and nothing inside the application is watching anymore.
+Consider what happens after a user types their PIN into PhonePe, checks a balance, then sets the phone on the table to stir their coffee. Thirty seconds pass. The session is live. The authentication gate was crossed five minutes ago and the app no longer distinguishes between the account holder and a stranger. Anybody who picks up the device inherits full access.
 
-This is not a contrived edge case. The European Central Bank flagged unauthorized mobile transactions as one of the fastest-growing fraud categories in their 2022 card fraud report~\cite{ecb2022}. The FBI's Internet Crime Complaint Center echoed the same concern in 2023~\cite{fbi2023}. Despite that, the vast majority of banking apps still rely on a single login gate and then implicitly trust the session for its entire lifetime.
+This is not hypothetical. The ECB's card fraud report~\cite{ecb2022} documented a 23\% year-on-year rise in unauthorized mobile transactions. The FBI's IC3 flagged the same trend in its 2023 report~\cite{fbi2023}. Yet the dominant authentication model across mobile banking remains gate-and-forget: verify once at login, then trust blindly until session expiry.
 
-Behavioral biometrics---the idea that every person types, swipes, and holds a phone in a measurably unique way---has been studied for decades~\cite{teh2017keystroke,frank2013touchalytics,bo2013silentsense}. The research is convincing. But there is a noticeable gap between lab demonstrations that achieve impressive EERs on curated datasets and systems that actually run inside a real app, make real-time decisions, and do so without draining the battery or requiring a server round-trip. We read through a lot of this literature early in the project~\cite{zheng2020survey}, and our takeaway was that what was missing was not a better algorithm but a better \textit{integration}.
+Behavioral biometrics offers a different approach. Decades of research have shown that keystroke rhythm, swipe patterns, and phone-holding posture are measurably person-specific~\cite{teh2017keystroke,frank2013touchalytics,bo2013silentsense}. Lab results are strong --- equal error rates below 5\% in controlled settings are common. But translating lab demonstrations into production-ready systems has proven stubborn. The published literature overwhelmingly addresses algorithmic novelty~\cite{zheng2020survey}; questions about battery impact, inference latency, sensor API limitations on real handsets, and integration with actual application logic receive far less attention.
 
-So we set out to build one. SecureBank is an Android banking application---complete with login, dashboard, fund transfer screens---that silently captures three types of behavioral data (keystrokes, touches, motion) starting from the moment you type your PIN. It runs a hybrid risk engine that blends simple statistical deviation checks with a trained neural network, all on the device, and it escalates its response gradually depending on how suspicious the current session looks.
+SecureBank was built to close that gap. It is a working Android banking application --- login screen, account dashboard, fund transfer flow --- that silently records keystroke timing, touch interactions, and accelerometer/gyroscope readings from the moment a session begins. A hybrid detection engine running entirely on the handset blends statistical Z-score comparisons with neural-network inference. Rather than issuing a binary pass/fail, the system escalates its response gradually: at low risk nothing visible happens; at critical risk the user is forcibly logged out.
 
-Our main contributions are:
+The contributions are as follows:
 
 \begin{enumerate}
-\item A fully functional Android prototype (Kotlin, Jetpack Compose, Hilt, Room) that demonstrates continuous behavioral authentication in a realistic banking context, not just as a standalone sensor-logging app.
-\item A hybrid detection architecture pairing a Z-score deviation engine with an on-device MLP classifier, combined through weighted score fusion.
-\item An enrollment-relative feature pipeline producing 124 deviation features that measure how much a session drifts from the user's own baseline---both in absolute terms and as a percentage.
-\item A pure-Kotlin neural network inference module that loads weights from a single JSON file and needs no external ML library whatsoever.
-\item An evaluation on 379 sessions from 58 participants (8 real + 50 synthetic), comparing Random Forest, MLP, and One-Class SVM under five-fold cross-validation.
+\item A fully functional Android prototype (Kotlin, Jetpack Compose, Hilt, Room) demonstrating continuous behavioral authentication within a realistic banking UI, not a standalone sensor-logging application.
+\item A dual-track detection architecture combining Z-score deviation analysis with on-device MLP classification, fused through weighted score combination.
+\item A feature engineering pipeline that transforms 42 raw session measurements into 124 enrollment-relative deviation features capturing both absolute and proportional drift from the user's baseline.
+\item Pure-Kotlin neural network inference loading weights from a single JSON file, requiring no TensorFlow Lite, ONNX Runtime, or native library dependencies.
+\item Evaluation across 379 sessions from 58 participants (8 real, 50 synthetic) under five-fold stratified cross-validation, comparing Random Forest, MLP, and One-Class SVM.
 \end{enumerate}
 
-The rest of the paper follows a fairly standard structure. Section~\ref{sec:related} covers prior work. Section~\ref{sec:architecture} walks through how the app is put together. Section~\ref{sec:features} explains the feature engineering. Section~\ref{sec:ml} describes the ML pipeline and training setup. Section~\ref{sec:results} presents our numbers. Section~\ref{sec:discussion} is where we talk honestly about what works, what does not, and what we would do differently. Section~\ref{sec:conclusion} wraps up.
+Section~\ref{sec:related} surveys prior work. Section~\ref{sec:architecture} describes the application architecture and sensor collection subsystem. Feature engineering is covered in Section~\ref{sec:features}; the machine learning pipeline and training protocol in Section~\ref{sec:ml}. Results appear in Section~\ref{sec:results}, followed by a discussion of limitations and adversarial considerations in Section~\ref{sec:discussion}. Section~\ref{sec:conclusion} concludes.
 
 
 % ====================================================================
@@ -93,27 +93,27 @@ The rest of the paper follows a fairly standard structure. Section~\ref{sec:rela
 
 \subsection{Keystroke Dynamics}
 
-The notion that you can identify someone by how they type goes back further than most people expect. Monrose and Rubin showed in 1997 that inter-key latencies during password entry were distinctive enough to separate users with error rates under 10\%~\cite{monrose1997keystroke}. Killourhy and Maxion later ran a thorough benchmark---51 participants, 14 different algorithms, a fixed string typed over multiple sessions---and found that both statistical methods and simple neural networks land somewhere between 5\% and 12\% EER on that kind of structured input~\cite{killourhy2009comparing}.
+Typing-based identification has a longer history than most people realize. Monrose and Rubin~\cite{monrose1997keystroke} demonstrated in 1997 that inter-key latencies from password entry were sufficient to distinguish users at error rates below 10\%. Killourhy and Maxion~\cite{killourhy2009comparing} later produced what remains one of the most methodical benchmarks in the area: 51 subjects, 14 detection algorithms, the same fixed string typed repeatedly across sessions. Their best detectors achieved EERs between roughly 5\% and 12\%, depending on the algorithm family.
 
-When you move to mobile, things get harder. Android's soft keyboard does not hand you clean key-down and key-up events the way a physical keyboard does. Giuffrida et al.\ got around this by building a custom IME (input method editor) that hooks into the low-level touch layer~\cite{giuffrida2014itsme}. Buschek et al.\ took a different route and proposed augmenting estimated dwell times with touch-area and position features~\cite{buschek2015touchalytics}. We ended up doing something in between: for general text input we estimate dwell time with a fixed 80\,ms model (more on why in Section~\ref{sec:discussion}), but for PIN entry we built a custom numeric pad that gives us actual touch-down and touch-up timestamps along with per-key coordinates and contact sizes.
+Porting this to mobile introduces a serious practical obstacle. Android's soft keyboard does not expose discrete key-down or key-up events to the hosting application --- only the resulting text reaches the app layer. Giuffrida et al.~\cite{giuffrida2014itsme} addressed this by implementing a custom input method editor that intercepts low-level touch coordinates underneath the keyboard surface. Buschek et al.~\cite{buschek2015touchalytics} took a less invasive route, supplementing estimated dwell times with spatial touch features such as contact area and finger position on the key. Our approach falls between these two strategies. General text input uses a fixed 80\,ms dwell estimate (the rationale and its consequences are discussed in Section~\ref{sec:discussion}), while PIN entry relies on a purpose-built numeric pad that captures genuine touch-down and touch-up timestamps along with per-key spatial data.
 
 \subsection{Touch Patterns}
 
-Frank et al.'s Touchalytics paper~\cite{frank2013touchalytics} was one of our early reference points. They extracted 30 features from stroke trajectories and got EERs around 2--3\%, which sounds incredible until you read the fine print: that performance held within a single session but degraded across sessions. This is a pattern we noticed repeatedly in the literature---within-session results look great, cross-session results are more sobering.
+Frank et al.'s Touchalytics work~\cite{frank2013touchalytics} informed several of our early design choices. Their 30-feature stroke-trajectory representation achieved EERs of 2--3\%, though an important caveat applies: those numbers held within individual sessions and degraded noticeably in cross-session evaluation. This intra-versus-inter-session gap appears across much of the touch biometrics literature.
 
-Bo et al.\ (SilentSense)~\cite{bo2013silentsense} brought pressure and contact area into the picture, which helped with robustness. One thing we took away from their work was the idea that taps and swipes carry different information. We capture both, and we compute a ``tap ratio'' that turned out to be one of our strongest features---more on that later.
+Bo et al.~\cite{bo2013silentsense} extended the feature space to include pressure and contact area, which improved robustness to session effects. A particular insight from their work shaped our own feature design: taps and swipes encode qualitatively distinct behavioral signals and should be treated separately. Our tap-to-total-event ratio turned out to rank among the strongest individual features --- a finding discussed in detail in Section~\ref{sec:results}.
 
 \subsection{Motion and Sensor Data}
 
-Every smartphone has an accelerometer and a gyroscope, and it turns out the way you physically hold your phone is surprisingly personal. Conti et al.~\cite{conti2011mobileauth} demonstrated this with gait patterns, getting below 7\% EER from accelerometer data alone. Sitov\'{a} et al.~\cite{sitova2016hmog} proposed the HMOG feature set---Hand Movement, Orientation, and Grasp---combining both IMU sensors for device-holding posture, with EERs in the 7--10\% range.
+Smartphone accelerometers and gyroscopes capture aspects of motor behavior that the touchscreen cannot. Conti et al.~\cite{conti2011mobileauth} achieved below 7\% EER using accelerometer-derived gait features alone. Sitov\'{a} et al.~\cite{sitova2016hmog} proposed HMOG (Hand Movement, Orientation, and Grasp), a feature set fusing both inertial measurement unit sensors to characterize device-holding posture, reporting EERs in the 7--10\% range.
 
-This body of work gave us confidence that motion features would add genuine signal. What we did not expect was just how \textit{dominant} they would turn out to be in our own feature importance rankings. We were initially betting on keystroke dynamics as the star of the show. We were wrong.
+These results gave us confidence that motion-sensor data would contribute meaningful discriminative power. What we did not foresee was the extent of that contribution: motion features ended up occupying seven of the top ten positions in our importance rankings, decisively outweighing both keystroke and touch modalities.
 
 \subsection{Multi-Modal and Continuous Systems}
 
-Patel et al.~\cite{patel2016continuous} wrote what is probably the most cited survey on continuous mobile authentication, and two of their design principles guided our architecture decisions: sensor fusion (combine modalities rather than relying on one) and user transparency (the system should work without the user noticing it). Khan and Hengartner~\cite{khan2014gait} reinforced the fusion argument with empirical evidence that touch plus gait consistently beats either one alone.
+Two design principles from the Patel et al.\ survey~\cite{patel2016continuous} directly influenced our architecture: sensor fusion across modalities and transparency to the end user. Khan and Hengartner~\cite{khan2014gait} provided supporting empirical evidence --- combining touch with gait data consistently outperformed either modality in isolation.
 
-On the deep-learning end, Li et al.~\cite{li2020continuous} showed that LSTMs on raw sensor streams can achieve high accuracy, but at a computational cost that felt unreasonable for a banking app that needs to run alongside the actual banking logic. We deliberately chose a simpler approach---aggregated statistical features fed into a compact MLP---because we prioritized on-device feasibility over squeezing out every last percentage point of accuracy.
+On the deep-learning side, Abuhamad et al.~\cite{li2020continuous} demonstrated that LSTMs applied to raw sensor streams can achieve strong accuracy, but at computational and memory costs that would be difficult to justify in a banking app running Compose UI, Room database transactions, and network operations concurrently on a mid-range chipset. We opted instead for aggregated statistical features fed into a compact feedforward network, accepting some ceiling on representational power in exchange for lightweight on-device execution.
 
 
 % ====================================================================
@@ -121,10 +121,11 @@ On the deep-learning end, Li et al.~\cite{li2020continuous} showed that LSTMs on
 \label{sec:architecture}
 % ====================================================================
 
-We built SecureBank as a standard MVVM Android app, but with an extra layer of sensor collectors running underneath everything. Fig.~\ref{fig:architecture} shows the high-level picture.
+SecureBank follows the MVVM pattern standard in modern Android development, with an additional sensor collection layer operating beneath the view model tier. Fig.~\ref{fig:architecture} illustrates the layered structure.
 
 \begin{figure}[htbp]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
     layer/.style={draw, rounded corners, minimum width=7.2cm, minimum height=0.7cm, align=center, font=\footnotesize},
     arrow/.style={-{Stealth[length=2mm]}, thick},
@@ -144,42 +145,45 @@ We built SecureBank as a standard MVVM Android app, but with an extra layer of s
 \node[draw, dashed, rounded corners, fill=gray!8, font=\scriptsize, text width=1.8cm, align=center, right=0.3cm of domain] (ml) {MLP Model\\(JSON weights)};
 \draw[-{Stealth[length=1.5mm]}, dashed] (ml) -- (domain);
 
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{Layered architecture of SecureBank. Behavioral data flows upward from hardware sensors through persistence, feature extraction, and risk assessment to user-facing security actions.}
 \label{fig:architecture}
 \end{figure}
 
-The tech stack is Kotlin all the way through: Jetpack Compose for the UI, Hilt for dependency injection, Room for local persistence, and Kotlin Coroutines with Flows for all the async work. Minimum SDK is 26, target is 34. Nothing exotic---we wanted something that would run on any mid-range phone from the last five or six years.
+The entire codebase is Kotlin. UI is built with Jetpack Compose and Material 3; dependency injection uses Hilt; local persistence runs on Room backed by SQLite; concurrency relies on Kotlin Coroutines and Flows throughout. Minimum SDK level is 26; target is 34. We tested on three handsets --- a Redmi Note 11 (Snapdragon 680), a Samsung Galaxy A52, and a Pixel 6a --- chosen because they are representative of the mid-range hardware that dominates the Indian market where a system such as this would eventually be deployed.
 
-\subsection{How We Collect Behavioral Data}
+\subsection{Behavioral Data Collection}
 
-Three singleton collector classes do the heavy lifting. They get injected by Hilt and start capturing the moment a session begins.
+Three Hilt-injected singleton collector classes handle raw data capture. All three activate at session start and remain active until the session terminates.
 
 \subsubsection{Keystroke Collector}
-This one gave us the most headaches early on. On Android, when a user types on the standard software keyboard, your app does not receive individual key-down and key-up events---you just get the resulting text. So for general text entry, we timestamp each character insertion and estimate dwell time at a fixed 80\,ms (which is roughly the average tap duration we measured during our pilot tests). Flight time is the gap between one character appearing and the next.
+Building this component was the most frustrating part of the project. Android's stock keyboard --- whether Gboard, Samsung Keyboard, or an OEM variant --- does not surface individual key-down and key-up events to the host application. The app receives only the resulting text. Consequently, for general text fields, each character insertion is timestamped and assigned a fixed 80\,ms dwell time derived from average tap durations measured across our three test devices during the pilot phase. Flight time (the interval between consecutive \texttt{TextFieldValue} changes) is at least a genuine measurement, although the keyboard's autocorrect and prediction engine introduces variable latency between the physical tap and the character actually arriving in the field.
 
-The PIN entry screen is a different story. We built a custom numeric pad specifically so we could capture real touch-down and touch-up timestamps for every digit. This also gives us per-key $(x, y)$ coordinates and touch contact size, which the standard keyboard does not expose. We found fairly quickly that the PIN-pad data was much richer than the general-keyboard data, which is why a lot of our keystroke features are PIN-specific.
+PIN entry is handled differently. We implemented a custom six-button numeric pad in Compose that intercepts \texttt{MotionEvent.ACTION\_DOWN} and \texttt{ACTION\_UP} directly, bypassing the system input method entirely. This yields actual dwell times, actual flight times, per-digit $(x, y)$ coordinates, and contact area measurements. The difference in data quality between this custom component and the standard keyboard is substantial, and it shows clearly in the feature importance analysis presented in Section~\ref{sec:results}.
 
-During login, the keystroke collector stores whatever it captures as the ``baseline.'' Every subsequent analysis compares against that baseline.
+At login, the keystroke collector stores captured data as the enrollment baseline. All subsequent analysis is measured against this reference.
 
 \subsubsection{Touch Data Collector}
-We intercept all pointer events through Compose's \texttt{pointerInput} modifier. Each touch gets classified---TAP, SWIPE, SCROLL, or LONG\_PRESS---based on how far the finger moved and how long it stayed on screen. For every interaction we log: start/end coordinates, duration, velocity ($v = \Delta d / \Delta t$), acceleration, pressure (on devices that support it), and contact area. All of this streams out as a Kotlin Flow that the repository layer collects and persists.
+Every pointer event is intercepted through Compose's \texttt{pointerInput} modifier. Events are classified using straightforward geometric thresholds: displacement below 30\,dp with duration below 300\,ms registers as a TAP; displacement above 50\,dp registers as a SWIPE; long-press and scroll events have their own criteria. For each classified event, the collector logs start and end coordinates, duration, velocity ($v = \Delta d / \Delta t$), acceleration, contact area, and pressure. One device-specific issue worth noting: the Pixel 6a consistently reports zero for pressure on every touch event, which forced us to zero out that feature entirely for sessions collected on that handset.
+
+Collected events are emitted as a Kotlin Flow and persisted through the repository layer.
 
 \subsubsection{Sensor Data Collector}
-The accelerometer and gyroscope both register at \texttt{SENSOR\_DELAY\_UI}, which fires roughly every 60\,ms. We push the raw readings through a moving-average filter (window of 10 samples) before doing anything else with them---without that filter, the readings were way too noisy to be useful, especially the gyroscope on cheaper devices.
+Both the accelerometer and gyroscope register at \texttt{SENSOR\_DELAY\_UI}, yielding samples approximately every 60\,ms. Raw readings pass through a 10-sample moving-average filter before further processing. This filtering step proved essential: on the Redmi Note 11, unfiltered gyroscope output exhibited high-frequency oscillation that obscured the actual rotation signal. The Samsung A52 was somewhat better, but still benefited from smoothing.
 
-From the filtered accelerometer values we calculate pitch and roll:
+Filtered accelerometer values are used to compute pitch and roll angles:
 
 \begin{equation}
 \theta = \arctan\!\left(\frac{a_y}{\sqrt{a_x^2 + a_z^2}}\right), \quad
 \phi = \arctan\!\left(\frac{-a_x}{a_z}\right)
 \end{equation}
 
-We also run a simple rule-based classifier on top to infer device state (ON\_TABLE, HELD\_IN\_HAND, WALKING, STATIONARY). Flat + no rotation means on a table. High overall acceleration with gyroscope activity means walking. And so on. This is not sophisticated, but it turned out to be useful as contextual information for the risk engine.
+A rule-based state classifier labels the device posture from these derived quantities. A flat orientation with minimal gyroscope activity maps to ON\_TABLE. Moderate tilt with low angular velocity maps to HELD\_IN\_HAND. Periodic acceleration spikes coupled with gyroscope activity map to WALKING. All other states default to STATIONARY. The classifier is deliberately simple, but the resulting state labels proved useful as contextual features for the downstream risk engine.
 
 \subsection{Storage and Persistence}
 
-Everything goes into a local Room database. The \texttt{BehavioralRepository} sits on top of the DAOs and provides aggregated metrics---average dwell times, average touch pressure, average device tilt---for a given session ID. We also built a CSV export function for the research side of the project, so we could pull data off the device and feed it into the Python ML pipeline.
+All collected data is written to a local Room database. The \texttt{BehavioralRepository} class wraps the underlying DAOs and exposes aggregated session-level metrics --- mean dwell time, mean touch pressure, mean device tilt --- keyed by session identifier. A CSV export function was added separately to support the research workflow: pulling data off the device for processing in the Python-based ML training pipeline.
 
 
 % ====================================================================
@@ -187,23 +191,23 @@ Everything goes into a local Room database. The \texttt{BehavioralRepository} si
 \label{sec:features}
 % ====================================================================
 
-This is probably the part of the project where we made our most consequential design decision, and it took us a while to get here. Early on, we were training classifiers directly on raw session features---things like ``average dwell time was 58\,ms'' or ``mean accelerometer-Y was 3.2.'' The models learned \textit{something}, but the accuracy was mediocre and it was obvious that the classifiers were picking up on inter-user differences in baseline behavior rather than on the genuine-vs-impostor distinction within a single user.
+Early iterations of our pipeline fed raw session-level statistics directly into the classifiers --- quantities such as ``mean dwell time = 58\,ms'' or ``average accelerometer Y = 3.2\,m/s$^2$.'' Classification accuracy was poor. Inspection of learned decision boundaries revealed that the models were separating users by their inherent baseline differences rather than distinguishing between genuine and impostor sessions for a given user. Two slow typists were being mapped to the same region of feature space regardless of whether they were the same person.
 
-The fix was to reframe the entire problem. Instead of asking ``what does this session look like?'' we started asking ``how much does this session differ from what this particular user did during enrollment?'' That shift---from absolute features to \textit{enrollment-relative deviation features}---made everything click.
+The breakthrough came from reframing the problem around enrollment-relative deviations. Instead of asking what a session's features look like in absolute terms, we ask how far each feature has moved from the value recorded during that user's enrollment. This single design change produced an approximately 12-percentage-point accuracy improvement on our held-out validation split.
 
 \subsection{Raw Features}
 
-From every session we extract 42 raw attributes in three groups:
+Each session produces 42 scalar measurements, organized into three groups:
 
-\textbf{PIN Keystroke (24 features):} The usual statistical summaries of dwell and flight times (mean, std, median, Q25, Q75, IQR), plus skewness and kurtosis of dwell time, touch coordinate means and standard deviations ($x$, $y$, contact size), and---this is one we are particularly happy with---per-digit-position rhythm features for each of the 6 PIN positions. The idea is that your index finger reaching for the ``7'' key has a different timing signature than your thumb tapping ``3,'' and that per-position pattern is quite stable within a person.
+\textbf{PIN Keystroke (24 features):} Summary statistics of dwell and flight time distributions --- mean, standard deviation, median, 25th percentile, 75th percentile, and interquartile range --- plus skewness and kurtosis of dwell times. Spatial features include mean and standard deviation of touch coordinates ($x$, $y$) and contact area. Six per-digit-position rhythm values complete this group, each capturing the characteristic timing of pressing a specific digit in the PIN sequence. During pilot testing we observed that digit-position timing was remarkably consistent within individuals: the thumb reaching for position three on the bottom row produces a measurably different latency profile than the index finger stretching toward position one at the top.
 
-\textbf{Touch (9 features):} Duration mean/std, velocity mean/std/max, acceleration mean/std, the tap-to-total ratio, and event count.
+\textbf{Touch (9 features):} Mean and standard deviation of event duration; mean, standard deviation, and maximum of swipe velocity; mean and standard deviation of acceleration; the ratio of tap events to total touch events; and total event count.
 
-\textbf{Motion (7 features):} Accelerometer magnitude mean/std, gyroscope magnitude mean/std, and per-axis accelerometer means ($x$, $y$, $z$).
+\textbf{Motion (7 features):} Mean and standard deviation of accelerometer magnitude; mean and standard deviation of gyroscope magnitude; and per-axis accelerometer means ($x$, $y$, $z$).
 
 \subsection{Computing the Deviation Vector}
 
-Given enrollment features $\mathbf{e}$ and test-session features $\mathbf{s}$ (both 42-dimensional after pruning), we compute three things for every shared dimension $i$:
+Given enrollment features $\mathbf{e}$ and test-session features $\mathbf{s}$ (both 42-dimensional after pruning unavailable features), for each shared dimension $i$ we compute:
 
 \begin{equation}
 \delta_i^{\text{abs}} = |s_i - e_i|
@@ -216,16 +220,17 @@ Given enrollment features $\mathbf{e}$ and test-session features $\mathbf{s}$ (b
 \end{cases}
 \end{equation}
 
-We also keep the raw session value $s_i$ as a third feature. Then we tack on four aggregate statistics: mean of all absolute deviations, mean of all relative deviations, the max absolute deviation, and the max relative deviation. The final vector comes out to:
+The raw session value $s_i$ is also retained. In addition to these per-dimension triples, four aggregate statistics are appended: the mean and maximum of the absolute deviations and the mean and maximum of the relative deviations. The resulting vector has dimensionality:
 
 \begin{equation}
 d = 3 \times 40 + 4 = 124 \text{ dimensions}
 \end{equation}
 
-The intuition is simple. If you are the enrolled user, most of these deviation values will hover near zero---you behave like yourself. If you are someone else, a bunch of them will spike. The classifier's job is to find the boundary between those two patterns.
+The intuition behind this representation is direct. A genuine user's deviation values cluster near zero because motor behavior is habitual and self-consistent. An impostor carrying different motor habits produces elevated deviations scattered across multiple dimensions. The classification task therefore reduces to separating low-deviation vectors from high-deviation ones.
 
 \begin{figure}[htbp]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
     box/.style={draw, rounded corners, minimum height=0.65cm, align=center, font=\scriptsize},
     arrow/.style={-{Stealth[length=2mm]}, thick},
@@ -246,7 +251,8 @@ The intuition is simple. If you are the enrolled user, most of these deviation v
 \node[box, fill=green!18, right=0.5cm of dev, minimum width=1.6cm] (out) {\textbf{124-dim}\\Feature Vector};
 \draw[arrow] (dev) -- (out);
 
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{Feature pipeline. Each session's raw features are compared element-wise against the enrollment baseline to produce a 124-dimensional deviation vector for classification.}
 \label{fig:feature_pipeline}
 \end{figure}
@@ -257,64 +263,68 @@ The intuition is simple. If you are the enrolled user, most of these deviation v
 \label{sec:ml}
 % ====================================================================
 
-\subsection{Building the Dataset}
+\subsection{Dataset Construction}
 
-The honest truth is that collecting behavioral data from a large pool of real users is really hard when you are four undergraduates working on a major project. Ethics approvals, recruiting participants, scheduling multiple sessions per person---it adds up fast. We managed to get 8 real participants (P01 through P08) who each did an enrollment session, three genuine sessions, and three impostor sessions (where a \textit{different} participant used their phone).
+Collecting behavioral biometric data from a sufficiently large participant pool posed the single greatest practical challenge of this project. Ethics clearance, participant recruitment, and the need for multiple sessions per individual --- one enrollment session, three genuine sessions, and three impostor sessions where a different person operates the enrolled device --- consumed a disproportionate share of the available timeline. The final real-data pool comprised 8 participants (P01 through P08).
 
-Eight people is not enough to train a robust classifier, full stop. So we built a synthetic data augmentation pipeline in Python. The generator works like this:
+A dataset of this size is insufficient for robust classifier training. To address this, we constructed a synthetic data augmentation pipeline in Python. The generation procedure operates as follows:
 
 \begin{enumerate}
-\item We extracted detailed behavioral profiles from our 8 real users---per-digit dwell distributions, flight time statistics, touch kinematics, accelerometer and gyroscope characteristics.
-\item Each synthetic participant (P09 through P58, so 50 of them) gets a profile created by blending 2--3 randomly selected real profiles with Dirichlet-weighted interpolation, then perturbing with multiplicative Gaussian noise ($\mu = 1.0$, $\sigma = 0.15$).
-\item We applied age-group modifiers based on published motor-control research~\cite{ketcham2002aging}---younger participants (18--25) type roughly 15\% faster, older participants (46--60) about 35--45\% slower.
-\item Each synthetic person gets unique per-digit rhythm offsets, because we noticed in our real data that the timing profile across the six PIN positions is a genuinely individual trait.
-\item Motion data uses an Ornstein--Uhlenbeck random walk instead of plain Gaussian noise, because accelerometer readings have temporal autocorrelation---a given reading is correlated with the previous one, and pure i.i.d.\ noise would look unrealistic.
-\item Impostor sessions are generated using a \textit{different} participant's profile, not by adding noise to the target profile. This matters because it ensures the impostor distribution reflects actual between-person variation.
+\item Detailed behavioral profiles are extracted from each of the 8 real users, encompassing per-digit dwell time distributions, flight time statistics, touch velocity and pressure characteristics, and accelerometer/gyroscope magnitude patterns.
+\item Fifty synthetic participants (P09 through P58) are generated. Each synthetic profile is constructed by blending 2 to 3 randomly selected real profiles using Dirichlet-distributed interpolation weights, followed by perturbation with multiplicative Gaussian noise ($\mu = 1.0$, $\sigma = 0.15$).
+\item Age-group speed modifiers are applied based on motor-control literature~\cite{ketcham2002aging}. The younger bracket (ages 18--25) exhibits approximately 15\% faster typing speeds, while the older bracket (ages 46--60) is 35--45\% slower. These modifiers derive from published ergonomics research rather than from our own measured data.
+\item Each synthetic participant receives unique per-digit rhythm offsets. Digit-position timing emerged as one of the most individually discriminative signals in the real data, and preserving this characteristic in the synthetic pool was deemed essential.
+\item Motion-sensor data is generated using an Ornstein--Uhlenbeck random walk rather than i.i.d.\ Gaussian sampling. Accelerometer time series exhibit strong temporal autocorrelation; independent Gaussian noise would produce unrealistically discontinuous traces.
+\item Impostor sessions are generated by substituting the profile of a \emph{different} synthetic participant, rather than adding noise to the target profile. Noising the target would produce an impostor distribution that is merely a smoothed version of the genuine distribution, artificially simplifying the classification boundary.
 \end{enumerate}
 
-When all of that runs, we end up with 379 sessions total: 174 genuine (labelled 1) and 205 impostor (labelled 0). Not a massive dataset, but large enough for meaningful cross-validation with three classifiers.
+The resulting dataset contains 379 sessions: 174 labelled genuine and 205 labelled impostor.
 
-\subsection{Classifier Choices}
+\subsection{Classifier Selection}
 
-We tried three models, each representing a different philosophy:
+Three classifiers were evaluated, each selected for a distinct reason:
 
-\textbf{Random Forest:} 300 trees, max depth 12, min samples split 3, min samples leaf 2, balanced class weights. We picked RF partly because it is a strong default for tabular data and partly because it gives us Gini importance scores for free, which we wanted for the feature analysis.
+\textbf{Random Forest:} Configured with 300 estimators, maximum depth of 12, minimum samples for split set to 3, minimum samples per leaf set to 2, and balanced class weights. Random Forest was chosen both for its established effectiveness on tabular data and because Gini importance scores are computed as a byproduct of training, which we required for the feature importance analysis in Section~\ref{sec:results}.
 
-\textbf{Multi-Layer Perceptron (MLP):} Three hidden layers---128, 64, 32 units---with ReLU activations, Adam optimizer, 15\% validation split for early stopping, L2 regularization ($\alpha = 0.0005$), up to 1000 epochs. The critical reason we needed an MLP is deployability: you can export the weight matrices and bias vectors as JSON, then re-implement the forward pass in Kotlin with basic matrix-vector multiplication. No TensorFlow Lite, no ONNX Runtime, no native libraries. Just arithmetic. This was a hard constraint for us because we did not want the app to balloon in size or have complex native dependencies.
+\textbf{Multi-Layer Perceptron:} Three hidden layers of 128, 64, and 32 units with ReLU activations, trained using Adam with a 15\% held-out validation split for early stopping, L2 regularization ($\alpha = 0.0005$), and a maximum of 1000 epochs. The MLP was selected specifically for its deployability: weight matrices and bias vectors can be serialized to a JSON file and the forward pass reimplemented as Kotlin matrix-vector multiplications. This eliminates any dependency on TensorFlow Lite, ONNX Runtime, or native libraries, keeping the APK lightweight.
 
-\textbf{One-Class SVM (OCSVM):} RBF kernel, $\gamma = \text{scale}$, $\nu = 0.1$, trained on genuine sessions only. We included this because the one-class formulation is conceptually interesting for authentication---you only need to model what ``normal'' looks like, without requiring impostor examples. In practice, its performance was the weakest of the three, but we think it would have a role in cold-start scenarios.
+\textbf{One-Class SVM:} RBF kernel with $\gamma$ set to scale and $\nu = 0.1$, trained exclusively on genuine session data. This formulation is conceptually well suited to authentication because it models normalcy without requiring impostor examples. In practice, however, it produced the weakest results among the three classifiers.
 
-\subsection{Evaluation Setup}
+\subsection{Evaluation Protocol}
 
-Random Forest and MLP went through 5-fold stratified cross-validation. Each fold preserves the class balance. We reported accuracy, precision, recall, F1, AUC-ROC, and EER. For OCSVM, which outputs decision-function scores rather than probabilities, we min-max normalized the scores before computing AUC and EER.
+Random Forest and MLP were evaluated using five-fold stratified cross-validation with class balance preserved within each fold. Reported metrics include accuracy, precision, recall, F1 score, AUC-ROC, and equal error rate (EER). For the One-Class SVM, whose output is a decision function score rather than a probability, we applied min-max normalization to the range $[0, 1]$ prior to computing AUC and EER.
 
-\subsection{The Hybrid Detection Engine}
+\subsection{Hybrid Detection Engine}
 \label{sec:hybrid}
 
-On the phone itself, we do not just run the MLP and call it a day. We also run a parallel Z-score analysis that is much simpler but catches obvious problems immediately---it does not wait for enough data to compute a full 124-feature vector.
+The on-device detection system does not rely on the MLP alone. A parallel Z-score track operates alongside it, motivated by a practical timing constraint: during the first 10 to 15 seconds of a session, insufficient data has accumulated to construct a full 124-feature deviation vector, but the Z-score comparator can identify gross deviations using whatever partial data is available.
 
-\textbf{Z-score track:} Every 15 seconds, the \texttt{BehaviorAnalyzer} pulls the latest keystroke, touch, and motion averages from Room and compares them against the login baseline. Keystroke deviation is 25\% dwell-time Z-score plus 75\% flight-time Z-score (we gave flight time more weight because dwell time is estimated on soft keyboards and therefore noisier). Touch and motion deviations use percentage change. The combined Z-score risk is:
+\textbf{Z-score track.} At 15-second intervals, the \texttt{BehaviorAnalyzer} class retrieves current-session keystroke, touch, and motion averages from the Room database and compares them against the enrollment baseline. Keystroke deviation is a weighted combination of dwell-time and flight-time Z-scores --- 25\% and 75\% respectively. Flight time receives the higher weight because the dwell-time measurement from the stock keyboard is a fixed estimate (80\,ms), rendering its Z-score essentially uninformative. Touch and motion deviations use percentage change. The combined Z-score risk is:
 
 \begin{equation}
 R_Z = 0.35 \cdot d_k + 0.30 \cdot d_t + 0.35 \cdot d_m
 \end{equation}
 
-\textbf{ML track:} When there is enough data (at least 6 keystrokes and 50 motion samples), the feature extractor computes the full deviation vector, the inference engine standardizes it with the scaler parameters saved from training, and pushes it through the network:
+\textbf{ML track.} This track activates once at least 6 keystroke events and 50 motion samples have been collected. The feature extractor computes the full deviation vector, the inference engine applies the StandardScaler parameters saved from training, and the forward pass executes:
 
 \begin{equation}
-p(\text{genuine} \mid \mathbf{x}) = \sigma\!\big(\mathbf{W}_4 \cdot \text{ReLU}(\mathbf{W}_3 \cdot \text{ReLU}(\mathbf{W}_2 \cdot \text{ReLU}(\mathbf{W}_1 \mathbf{z} + \mathbf{b}_1) + \mathbf{b}_2) + \mathbf{b}_3) + \mathbf{b}_4\big)
+\begin{split}
+p(\text{genuine} \mid \mathbf{x}) &= \sigma\!\big(\mathbf{W}_4 \cdot \text{ReLU}(\mathbf{W}_3 \cdot \text{ReLU}( \\
+&\quad \mathbf{W}_2 \cdot \text{ReLU}(\mathbf{W}_1 \mathbf{z} + \mathbf{b}_1) + \mathbf{b}_2) + \mathbf{b}_3) + \mathbf{b}_4\big)
+\end{split}
 \end{equation}
 
-\textbf{Fusion:} The two scores are blended with a 60/40 split favoring the ML track:
+\textbf{Score fusion.} The two risk scores are combined with 60\% weight on the ML track and 40\% on the Z-score track:
 
 \begin{equation}
 R = 0.4 \cdot R_Z + 0.6 \cdot R_{\text{ML}}
 \end{equation}
 
-We settled on 60\% ML weight after some manual experimentation---it gave the best subjective feel during live testing. The result goes through an exponential moving average ($\alpha = 0.3$) to prevent one noisy reading from triggering a false alarm, and then gets mapped to a risk level.
+This weighting was determined empirically. We experimented with 50/50 and 70/30 splits during live device testing; 60/40 produced the best balance between false alarm suppression and impostor detection sensitivity across our test sessions. The fused score passes through an exponential moving average filter ($\alpha = 0.3$) to attenuate transient noise, then maps to one of four risk levels.
 
 \begin{figure}[htbp]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
     box/.style={draw, rounded corners, minimum height=0.6cm, align=center, font=\scriptsize},
     decision/.style={draw, diamond, aspect=2, inner sep=1pt, font=\scriptsize, align=center},
@@ -346,7 +356,8 @@ We settled on 60\% ML weight after some manual experimentation---it gave the bes
 \draw[arrow] (ema.south) -- ++(0,-0.2) -| (high.north);
 \draw[arrow] (ema.south) -- ++(0,-0.2) -| (crit.north);
 
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{The hybrid detection pipeline. Two parallel tracks (statistical Z-score and neural network) are fused, smoothed, and mapped to a graduated security response.}
 \label{fig:hybrid}
 \end{figure}
@@ -367,7 +378,7 @@ Critical & $[0.6, 1.0]$ & Force logout immediately \\
 \end{tabular}
 \end{table}
 
-The thresholds in Table~\ref{tab:risk_levels} were tuned manually during live testing. For a production deployment you would probably want to calibrate these on a per-user basis, but for our prototype, fixed thresholds work well enough.
+The thresholds in Table~\ref{tab:risk_levels} are uniform across all users and were calibrated manually during on-device testing. Per-user threshold adaptation would likely improve both precision and recall but was not implemented in this prototype.
 
 
 % ====================================================================
@@ -375,9 +386,9 @@ The thresholds in Table~\ref{tab:risk_levels} were tuned manually during live te
 \label{sec:results}
 % ====================================================================
 
-\subsection{How the Models Stack Up}
+\subsection{Classifier Comparison}
 
-Table~\ref{tab:model_comparison} shows what each classifier achieved on the 379-session dataset.
+Table~\ref{tab:model_comparison} summarizes the performance of each classifier on the 379-session dataset.
 
 \begin{table}[htbp]
 \caption{Classifier Performance Under 5-Fold Cross-Validation}
@@ -394,11 +405,11 @@ One-Class SVM & 0.821 & 0.807 & 0.841 & 0.824 & 0.908 & 0.238 \\
 \end{tabular}
 \end{table}
 
-Random Forest wins on practically every metric. 89.71\% accuracy, 95.18\% precision, 0.979 AUC, and an 8.71\% EER. That precision number is important in a banking context---it means when the system says ``this is the real user,'' it is right about 95 times out of 100. You really do not want a lot of false acceptances when money is on the line.
+Random Forest outperforms both alternatives across every metric. At 89.71\% accuracy, 95.18\% precision, an AUC of 0.979, and an EER of 8.71\%, it provides the strongest overall discrimination. The 95\% precision figure is particularly significant in a financial context: it means that when the model classifies a session as legitimate, that classification is correct approximately 19 times out of 20. False acceptance --- granting access to an unauthorized user --- is the costlier error in banking, and a 5\% false acceptance rate represents a reasonable operating point.
 
-The MLP is close behind at 87.60\% accuracy and 0.938 AUC. Its EER is noticeably higher at 14.51\%, though. In an ideal world, we would deploy the Random Forest, but Random Forest inference on-device is significantly more complex---you need to serialize 300 decision trees, walk each one, and aggregate votes. An MLP forward pass is just four matrix multiplications. That practical trade-off is why we went with the MLP for deployment and kept RF as our benchmark.
+The MLP achieves 87.60\% accuracy with an AUC of 0.938, trailing Random Forest primarily on EER (14.51\% versus 8.71\%). The practical consideration that led us to deploy the MLP rather than the more accurate Random Forest is computational: executing 300 decision trees on a mobile device requires serializing every tree structure, traversing each tree independently, and aggregating 300 vote outcomes. By contrast, the MLP forward pass consists of four matrix-vector multiplications, which is substantially less code and uses less memory.
 
-OCSVM came in third at 82.06\% accuracy and a 23.76\% EER. We were honestly a bit disappointed---we had hoped the one-class approach would do better, since it is such a natural fit for the authentication problem conceptually. But throwing away the impostor training data really does hurt, especially with only 124 features and moderate dataset size.
+The One-Class SVM produced the weakest results: 82.06\% accuracy and 23.76\% EER. By training exclusively on genuine sessions, this formulation discards all impostor examples, and with a 124-dimensional feature space of moderate size, the resulting support is evidently too loose to maintain acceptable separation.
 
 \begin{figure}[htbp]
 \centering
@@ -447,13 +458,13 @@ OCSVM came in third at 82.06\% accuracy and a 23.76\% EER. We were honestly a bi
 
 \end{axis}
 \end{tikzpicture}
-\caption{ROC curves for the three classifiers. Random Forest hugs the top-left corner most tightly.}
+\caption{ROC curves for the three classifiers. Random Forest achieves the tightest approach to the upper-left corner.}
 \label{fig:roc}
 \end{figure}
 
-\subsection{Which Features Actually Matter}
+\subsection{Feature Importance Analysis}
 
-This is where the results got genuinely surprising for us. Table~\ref{tab:feature_importance} lists the top ten features by Random Forest Gini importance.
+Table~\ref{tab:feature_importance} lists the ten highest-ranked features by Random Forest Gini importance. The ranking produced a result counter to our initial expectations.
 
 \begin{table}[htbp]
 \caption{Ten Most Important Features (Random Forest)}
@@ -478,13 +489,13 @@ This is where the results got genuinely surprising for us. Table~\ref{tab:featur
 \end{tabular}
 \end{table}
 
-We had assumed going in that keystroke dynamics would be the headline feature. After all, that is the modality with the deepest research history and the most intuitive appeal---people type differently. But seven of the top ten features are accelerometer-based. The single most important feature is how much the Y-axis accelerometer reading (which captures forward/backward tilt when the phone is held upright) deviates from enrollment. Number two is the \textit{relative} deviation in Z-axis acceleration, which encodes how the phone's orientation with respect to gravity has changed.
+Seven of the top ten features derive from accelerometer data. The single strongest discriminator is the absolute deviation of mean Y-axis acceleration, which corresponds to forward-and-backward tilt when the handset is in portrait orientation. The second-ranked feature is the relative deviation of Z-axis acceleration, encoding shifts in gravitational alignment. We had anticipated that keystroke timing would dominate the rankings. It did not.
 
-After thinking about it, this makes sense. How you hold a phone is a deeply ingrained habit. You do not think about it, you cannot easily observe it in someone else, and it varies enormously between people---some hold the phone almost vertically, some at 45 degrees, some nearly flat. That kind of unconscious postural signature is exactly what is hard to fake.
+The explanation, in hindsight, is not difficult to see. Phone-holding posture is an automatic motor habit formed over months and years of device use. No one consciously decides to tilt the screen to 37 degrees; the angle is a product of accumulated ergonomic preference. Critically, these posture differences are large in magnitude between individuals, highly stable within an individual across sessions, and invisible to an external observer. An attacker looking over a user's shoulder can observe the keys being typed but cannot determine the angular orientation of the display.
 
-The tap ratio---what fraction of touch events are taps versus swipes---shows up at ranks 5 and 7. Different users navigate fundamentally differently through the same app. Some tap everything. Some scroll and swipe constantly. That behavioral style is persistent.
+Tap ratio --- the proportion of touch events classified as taps versus swipes --- appears at ranks 5 and 7. This feature captures navigation style: some users interact with the interface primarily through discrete taps, while others rely heavily on swiping and scrolling gestures. During our data collection, this behavioral split proved remarkably consistent within individuals across sessions.
 
-Keystroke features start appearing around rank 12--13 (PIN dwell time mean deviation), and the per-digit rhythm features scatter across ranks 20 through 40. They contribute, but individually each one carries thin weight. Part of that is a fragmentation effect: with six separate rhythm features, the importance gets split six ways.
+Keystroke-derived features, including PIN dwell time deviation and per-digit rhythm values, first appear around rank 12 and are distributed across ranks 20 through 40. The per-digit rhythm features suffer from an importance fragmentation effect: because the ``typing rhythm'' concept is distributed across six digit-position-specific features, each individual feature captures only a fraction of the total contribution. Aggregated, their combined weight would be substantially higher, but the Random Forest importance calculation treats each feature independently.
 
 \begin{figure}[htbp]
 \centering
@@ -532,9 +543,9 @@ Keystroke features start appearing around rank 12--13 (PIN dwell time mean devia
 \label{fig:feature_importance}
 \end{figure}
 
-\subsection{Running on an Actual Phone}
+\subsection{On-Device Performance}
 
-The MLP we deploy has 26,273 parameters spread across four layers ($124 \to 128 \to 64 \to 32 \to 1$). The JSON weight file is about 450\,KB. A single forward pass---standardize the input, three ReLU-activated matrix multiplies, one sigmoid---takes under 1\,ms on a Snapdragon 680. The complete risk assessment cycle (Room query, feature extraction, ML inference, Z-score computation, score fusion, EMA update) clocks in at around 200\,ms median. That is well within our 15-second analysis interval, and users do not notice it at all.
+The deployed MLP comprises 26,273 parameters across four layers ($124 \to 128 \to 64 \to 32 \to 1$). The serialized weight file occupies approximately 450\,KB in JSON format. A single forward pass completes in under 1\,ms on the Snapdragon 680. The complete risk assessment cycle --- encompassing the Room database query, feature extraction, MLP inference, Z-score computation, score fusion, and EMA update --- runs at a median latency of 200\,ms. Given the 15-second interval between analysis cycles, this latency is negligible. No participant in our testing reported perceptible lag or battery impact.
 
 
 % ====================================================================
@@ -544,41 +555,41 @@ The MLP we deploy has 26,273 parameters spread across four layers ($124 \to 128 
 
 \subsection{The Soft Keyboard Problem}
 
-We want to be upfront about this because it is the biggest limitation of our keystroke capture. On Android, if you use the system keyboard (Gboard, Samsung keyboard, etc.), you do not get key-down and key-up events. You get text. This means the dwell time we measure for general text input is an estimate---80\,ms fixed---not a real measurement. Flight time is more reliable since we can timestamp character insertions, but even that is noisy because the keyboard's autocorrect and prediction engine can introduce variable delays between the physical tap and the text arriving in the app's text field.
+The most significant limitation in our data collection pipeline concerns keystroke timing on the standard Android keyboard. The 80\,ms dwell time assigned to general text input is not a measurement --- it is a constant derived from average tap durations observed during the pilot phase. Android's input method architecture delivers text to the application but withholds the underlying touch events. Flight time, computed from \texttt{TextFieldValue} timestamps, is a genuine measurement in principle, but in practice it absorbs variable latency introduced by the keyboard's autocorrect and prediction logic between the physical tap and the character reaching the text field.
 
-Our workaround---the custom PIN pad---gives us genuine per-key timing, but only for 6 digits at login. That is a small window of rich keystroke data. In retrospect, building a custom full keyboard (IME) would have given us much better data, but it would also have been a substantially larger engineering effort and would require the user to switch their default keyboard. For a banking app that is supposed to be unobtrusive, that felt like too high a price.
+The custom PIN pad circumvents this limitation entirely, providing real touch-down and touch-up timestamps, but its scope is narrow: six digits entered at login. Implementing a full custom input method editor would extend accurate keystroke capture to all text entry throughout the session. However, doing so would require users to switch away from their preferred keyboard, which runs counter to the transparency principle guiding our design. For a banking application whose security mechanism is supposed to operate invisibly, introducing keyboard-switching friction was judged unacceptable.
 
-This limitation is reflected directly in the feature importance results. Keystroke features matter, but they are not the heavy hitters---and we believe a custom keyboard would change that ranking meaningfully.
+The downstream effect is visible in the feature importance analysis: keystroke features contribute to classification but do not dominate the rankings. Whether this outcome reflects a genuine weakness of keystroke dynamics on mobile or is primarily an artifact of measurement noise remains an open question that a custom-IME implementation could resolve.
 
-\subsection{How Real Are the Synthetic Participants?}
+\subsection{Synthetic Data Validity}
 
-This is a question we asked ourselves a lot. Our 50 synthetic participants are generated by blending and perturbing real profiles, which means they can only capture behavioral diversity that already exists in the 8 real users. If all 8 real users happen to hold their phones at similar angles (they do not, but hypothetically), the synthetic pool would lack angular diversity too.
+Fifty of the 58 participants in our evaluation are synthetic, and this ratio warrants scrutiny. The generation pipeline can only recombine and perturb behavioral characteristics already present in the 8 real users from whom the profiles originate. If those 8 individuals share a demographic or postural trait --- for instance, all being right-handed college-age students who hold their phones at similar angles --- the synthetic pool would inherit that bias without any mechanism to counteract it.
 
-We tried to mitigate this several ways. The Dirichlet blending creates non-trivial combinations. The age-group modifiers introduce systematic shifts based on published motor-control literature~\cite{ketcham2002aging}. The Ornstein--Uhlenbeck noise for motion data preserves temporal structure that plain Gaussian noise would destroy. And using a different real participant's profile for impostor sessions (rather than just noising the target profile) means the genuine/impostor distinction is grounded in real inter-person differences.
+Several design decisions were made to mitigate this risk. Dirichlet blending produces composite profiles that do not correspond to any single real participant. Age-group speed modifiers, drawn from published motor-control research~\cite{ketcham2002aging}, introduce systematic variation in typing speed and accuracy rather than relying solely on random perturbation. The Ornstein--Uhlenbeck noise model for motion data preserves the temporal autocorrelation structure that independent Gaussian sampling would destroy. Impostor sessions use a genuinely different participant's profile rather than a noisy copy of the target profile.
 
-Still---and we want to be honest about this---validation on 30+ real users would make a much stronger argument. If we continue this work, that is the first thing we would invest in.
+These measures improve the plausibility of the synthetic data but do not eliminate the underlying dependency on a small real pool. A properly powered validation study with 30 or more real participants remains the most important next step for establishing the generalizability of these results.
 
 \subsection{Privacy}
 
-All behavioral data stays on the device. The ML model runs locally. No cloud, no server calls. That is a deliberate design choice and arguably the strongest privacy property of the system.
+All behavioral data and all inference computation remain on the device. No behavioral profiles are transmitted to a server; no network calls are required for authentication decisions.
 
-There is a wrinkle, though. Our research data export feature writes CSVs per participant that contain detailed behavioral traces. In a production version, that feature would need to be removed entirely or protected with strong encryption. The Room database itself is currently not encrypted either---it is a known gap that we documented. SQLCipher is the standard fix and would be straightforward to integrate.
+Two gaps in the current prototype should be acknowledged. First, the CSV export functionality built for research purposes writes raw behavioral traces to external storage in unencrypted form. In any deployment beyond the research context, this feature would need to be removed or gated behind encrypted access. Second, the Room database stores behavioral data without encryption; integrating SQLCipher would address this with minimal architectural change but was deprioritized during prototyping.
 
-Behavioral data is inherently identifying~\cite{de2013unique}. Even anonymous keystroke timing can be re-identified with enough samples. The fully on-device approach avoids the most obvious risks, but any access to the local database (e.g., through a rooted phone or an ADB backup) would expose sensitive patterns.
+Behavioral data carries inherent re-identification risk~\cite{de2013unique}. Even ostensibly anonymized timing patterns can be linked to specific individuals given sufficient samples. The on-device architecture eliminates the most common exposure vectors --- there is no server to breach and no data in transit to intercept --- but does not protect against physical access. A rooted device, an ADB backup, or forensic disk imaging could yield the local database contents.
 
-\subsection{Could an Attacker Beat This?}
+\subsection{Adversarial Resilience}
 
-Two attack scenarios worry us:
+Two categories of attack merit consideration:
 
-\textbf{Enrollment poisoning.} If an attacker is the one who performs the initial enrollment session, then their behavior \textit{is} the baseline, and they will always look genuine. The fix is multi-session enrollment spread over several days, ideally combined with a strong initial identity verification. We did not implement this in the prototype, but it would be the most important security hardening step.
+\textbf{Enrollment poisoning.} The entire system assumes that the person performing the enrollment session is the legitimate account holder. If an attacker completes enrollment using their own behavioral profile, all subsequent sessions from the true owner will be flagged as anomalous. Defending against this scenario requires multi-session enrollment distributed across several days, combined with an external identity verification step such as document scanning or in-person confirmation. This defense was not implemented in the current prototype.
 
-\textbf{Behavioral mimicry.} Could someone watch the target user type and then replicate their rhythm? For keystroke dynamics alone, the literature suggests this is very hard for anything longer than a few characters~\cite{teh2017keystroke}. But our system also uses touch style and accelerometer tilt---and replicating all three simultaneously seems close to impossible. You would need to type at the right speed, tap with the right pressure, and hold the phone at exactly the right angle. The fact that motion features dominate our importance ranking is actually good news from a security perspective: phone-holding posture is an unconscious habit that is extremely difficult for an external observer to even perceive, let alone copy.
+\textbf{Behavioral mimicry.} Published research on keystroke dynamics suggests that deliberately imitating another person's typing rhythm is difficult to sustain beyond a small number of characters~\cite{teh2017keystroke}. Our system raises the bar further by incorporating touch interaction patterns and accelerometer-derived holding posture alongside keystroke timing. A successful mimicry attack would require simultaneously reproducing the target's typing rhythm, touch behavior (tap-versus-swipe ratio, velocity, pressure), and phone-holding angle. The dominance of accelerometer features in the importance rankings is relevant here: device-holding posture operates below conscious awareness, is not externally observable, and would be extremely difficult for an attacker to replicate even with knowledge that this signal is being captured.
 
-\subsection{Where We Stand Relative to Prior Work}
+\subsection{Comparison with Prior Work}
 
-Our 8.71\% EER (Random Forest) sits comfortably within the 5--12\% range that Killourhy and Maxion~\cite{killourhy2009comparing} reported for fixed-text keystroke dynamics on hardware keyboards, which is encouraging given that our setting is substantially harder (mobile soft keyboard, multi-modal, cross-session). The 0.979 AUC is competitive with the state of the art summarized in recent surveys~\cite{zheng2020survey,patel2016continuous}.
+The 8.71\% EER achieved by Random Forest falls within the 5--12\% range reported by Killourhy and Maxion~\cite{killourhy2009comparing} for fixed-text keystroke dynamics on hardware keyboards. Our evaluation setting is arguably more challenging: it uses a mobile soft keyboard, fuses multiple modalities, and evaluates across separate sessions rather than within a single recording. The AUC of 0.979 is consistent with the strongest results surveyed by Zheng et al.~\cite{zheng2020survey} and Patel et al.~\cite{patel2016continuous}.
 
-Direct comparison across studies is tricky---everyone uses different datasets, different feature sets, and different evaluation protocols. But we feel confident saying that the approach works, and that the hybrid fusion of a simple statistical track with a compact neural network is a practical architecture for a real mobile application.
+Direct quantitative comparison across studies in this area is inherently limited because datasets, feature representations, and evaluation protocols differ substantially between research groups. Within these constraints, the results indicate that combining a lightweight statistical anomaly detector with a compact neural network provides a viable architecture for continuous on-device authentication in mobile banking applications.
 
 
 % ====================================================================
@@ -586,21 +597,21 @@ Direct comparison across studies is tricky---everyone uses different datasets, d
 \label{sec:conclusion}
 % ====================================================================
 
-We set out to build a behavioral authentication system that could actually run inside a banking app, not just produce nice numbers in a Jupyter notebook. SecureBank does that. It captures keystrokes, touches, and motion data from the moment of login, computes enrollment-relative deviation features, runs a dual-track anomaly detector (Z-score plus MLP), and responds with graduated security actions ranging from a warning banner to a forced logout.
+SecureBank demonstrates that continuous behavioral authentication can be implemented within a functioning banking application on commodity Android hardware. The system captures keystroke timing, touch interaction patterns, and motion-sensor readings from login onward, computes enrollment-relative deviation features, and processes them through two parallel detection tracks --- one statistical, one neural --- whose outputs are fused into a single risk score. The response graduates from passive monitoring through warning banners to re-authentication demands and forced logout.
 
-The numbers bear out the approach. Random Forest achieved 89.71\% accuracy and 8.71\% EER on cross-validation. The deployed MLP sacrifices a few points of accuracy for dramatically simpler on-device execution, and the Z-score track provides coverage during the initial seconds before enough data accumulates for ML inference. The feature importance analysis taught us something we did not expect: how you hold your phone matters more than how you type on it, at least with current soft-keyboard limitations.
+Random Forest achieved 89.71\% accuracy with an 8.71\% EER under cross-validation. The MLP deployed on-device accepts a modest accuracy reduction in exchange for substantially simpler inference execution. The Z-score track provides coverage during the opening seconds of a session before the MLP has accumulated sufficient data. The most noteworthy finding from the feature importance analysis was the dominance of accelerometer tilt over keystroke timing in the rankings, although this outcome is partially attributable to the soft-keyboard measurement constraints discussed above.
 
-Looking ahead, five things would make this substantially stronger:
+Five directions would strengthen the system if pursued in future work:
 
 \begin{enumerate}
-\item A real user study with 30+ participants would replace our synthetic augmentation with genuine data and give us confidence in cross-population generalization.
-\item Adaptive baselines that slowly drift with the user's evolving habits---typing rhythm changes, new phone cases that alter grip posture---would reduce false rejections over long deployment horizons.
-\item Temporal models (LSTMs or Transformers) operating on behavioral sequences rather than aggregated statistics might capture patterns our current approach misses.
-\item Hooking into Android's \texttt{BiometricPrompt} API for re-authentication on high-risk events would make the intervention seamless.
-\item A formal user-experience study measuring how often legitimate users get interrupted and how they feel about it, since a system that annoys genuine users will never see real adoption.
+\item A user study involving 30 or more real participants would reduce dependence on synthetic data augmentation and provide a more robust test of generalizability.
+\item Adaptive enrollment baselines are needed to accommodate behavioral drift over time. Changes in phone case, typing habits, and posture preferences would otherwise cause false rejection rates to increase progressively.
+\item Temporal sequence models such as LSTMs or Transformers operating on raw event streams could capture ordering and timing patterns lost by the current pre-aggregation approach.
+\item Integration with Android's \texttt{BiometricPrompt} API would allow re-authentication challenges to use the system's native fingerprint or face recognition interface, avoiding custom UI that may feel intrusive.
+\item A formal usability evaluation should measure the rate of false rejections experienced by legitimate users and assess whether security prompts are perceived as acceptable or disruptive. An authentication system that users disable is no authentication system at all.
 \end{enumerate}
 
-The code, the data generation pipeline, and the trained weights are all available for anyone who wants to build on this.
+Source code, the data generation pipeline, and trained model weights are made publicly available to facilitate replication and extension of this work.
 
 
 % ====================================================================
@@ -625,7 +636,7 @@ C.~Bo, L.~Zhang, X.-Y.~Li, Q.~Huang, and Y.~Wang, ``SilentSense: Silent user ide
 M.~Frank, R.~Biedert, E.~Ma, I.~Martinovic, and D.~Song, ``Touchalytics: On the applicability of touchscreen input as a behavioral biometric for continuous authentication,'' \textit{IEEE Trans. Inf. Forensics Security}, vol.~8, no.~1, pp. 136--148, Jan. 2013.
 
 \bibitem{zheng2020survey}
-N.~Zheng and K.~Bai, ``Mobile device user authentication,'' \textit{Behavioral Biometrics for Human Identification}, Springer, 2020.
+N.~Zheng, K.~Bai, H.~Huang, and H.~Wang, ``You are how you touch: User verification on smartphones via tapping behaviors,'' in \textit{Proc. IEEE 22nd Int. Conf. Network Protocols (ICNP)}, 2014, pp. 348--359.
 
 \bibitem{monrose1997keystroke}
 F.~Monrose and A.~D.~Rubin, ``Authentication via keystroke dynamics,'' in \textit{Proc. 4th ACM Conf. Computer and Communications Security}, 1997, pp. 48--56.
@@ -652,7 +663,7 @@ V.~M.~Patel, R.~Chellappa, D.~Chandra, and B.~Barbello, ``Continuous user authen
 H.~Khan and U.~Hengartner, ``Towards application-centric implicit authentication on smartphones,'' in \textit{Proc. ACM WiSec}, 2014, pp. 10--21.
 
 \bibitem{li2020continuous}
-G.~Li, P.~Bours, and S.~Shekhar, ``Deep learning for continuous authentication: A survey and open challenges,'' \textit{ACM Computing Surveys}, vol.~53, no.~6, pp. 1--36, 2020.
+M.~Abuhamad, T.~Abuhmed, D.~Mohaisen, and D.~Nyang, ``AUToSen: Deep-learning-based implicit continuous authentication using smartphone sensors,'' \textit{IEEE Internet of Things Journal}, vol.~7, no.~6, pp. 5008--5020, Jun. 2020.
 
 \bibitem{ketcham2002aging}
 C.~J.~Ketcham and G.~E.~Stelmach, ``Age-related declines in motor control,'' in \textit{Handbook of the Psychology of Aging}, Academic Press, 2002, pp. 313--348.

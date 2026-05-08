@@ -54,18 +54,25 @@ fun SecureBankNavGraph(
     val riskScore by bankingViewModel.currentRiskScore.collectAsState()
     val riskLevel by bankingViewModel.currentRiskLevel.collectAsState()
     val debugMode by bankingViewModel.debugMode.collectAsState()
+    val isMLReady by bankingViewModel.isMLReady.collectAsState()
+    val debugExplainabilityState by bankingViewModel.debugExplainabilityState.collectAsState()
+    val debugCounters by bankingViewModel.debugCounters.collectAsState()
+    val debugEvents by bankingViewModel.debugEvents.collectAsState()
     val showSecurityAlert by bankingViewModel.showSecurityAlert.collectAsState()
     val securityAlertMessage by bankingViewModel.securityAlertMessage.collectAsState()
+    val alertSeverity by bankingViewModel.alertSeverity.collectAsState()
+    val forceLogoutEvent by bankingViewModel.forceLogoutEvent.collectAsState()
     
     // Real-time monitoring
     val liveMotionData by bankingViewModel.liveMotionData.collectAsState()
     val liveTouchData by bankingViewModel.liveTouchData.collectAsState()
     val liveKeystrokeData by bankingViewModel.liveKeystrokeData.collectAsState()
     
-    // Security Alert Dialog
+    // Security Alert Dialog — severity determines available actions
     if (showSecurityAlert) {
         SecurityAlertDialog(
             message = securityAlertMessage,
+            severity = alertSeverity,
             onDismiss = {
                 bankingViewModel.dismissSecurityAlert()
             },
@@ -78,6 +85,37 @@ fun SecureBankNavGraph(
                 }
             }
         )
+    }
+
+    // Handle force-logout events from the ViewModel (item 1 enforcement)
+    LaunchedEffect(forceLogoutEvent) {
+        if (forceLogoutEvent) {
+            bankingViewModel.acknowledgeForceLogout()
+            authViewModel.logout()
+            navController.navigate(Screen.Login.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
+    // Lifecycle observer: pause/resume behavioral collection (item 2)
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                    bankingViewModel.pauseBehavioralCollection()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    bankingViewModel.resumeBehavioralCollection()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
     
     NavHost(
@@ -114,6 +152,10 @@ fun SecureBankNavGraph(
                     riskScore = riskScore,
                     riskLevel = riskLevel,
                     debugMode = debugMode,
+                    isMLReady = isMLReady,
+                    debugExplainabilityState = debugExplainabilityState,
+                    debugCounters = debugCounters,
+                    debugEvents = debugEvents,
                     liveMotionData = liveMotionData,
                     liveTouchData = liveTouchData,
                     liveKeystrokeData = liveKeystrokeData,
@@ -133,7 +175,12 @@ fun SecureBankNavGraph(
                     },
                     onToggleDebug = {
                         bankingViewModel.toggleDebugMode()
-                    }
+                    },
+                    onSimulateTypingAnomaly = bankingViewModel::simulateTypingAnomaly,
+                    onSimulateTouchAnomaly = bankingViewModel::simulateTouchAnomaly,
+                    onSimulateMotionAnomaly = bankingViewModel::simulateMotionAnomaly,
+                    onSimulateCriticalRisk = bankingViewModel::simulateCriticalRisk,
+                    onResetDemoRisk = bankingViewModel::resetDemoRisk
                 )
             } else {
                 // User not logged in, redirect to login

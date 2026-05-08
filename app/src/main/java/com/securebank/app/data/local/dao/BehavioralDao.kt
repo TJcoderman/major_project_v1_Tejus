@@ -26,12 +26,24 @@ interface KeystrokeDao {
     
     @Query("SELECT * FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = 0")
     suspend fun getSessionKeystrokes(sessionId: String): List<KeystrokeData>
+
+    @Query("SELECT * FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = 0 ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentSessionKeystrokes(sessionId: String, limit: Int): List<KeystrokeData>
     
     @Query("SELECT AVG(dwellTime) FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = :isBaseline")
     suspend fun getAvgDwellTime(sessionId: String, isBaseline: Boolean): Float?
     
     @Query("SELECT AVG(flightTime) FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = :isBaseline")
     suspend fun getAvgFlightTime(sessionId: String, isBaseline: Boolean): Float?
+
+    @Query("SELECT COUNT(*) FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = 0")
+    suspend fun getRecentKeystrokeCount(sessionId: String): Int
+
+    @Query("SELECT AVG(dwellTime) FROM (SELECT dwellTime FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = 0 ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun getRecentAvgDwellTime(sessionId: String, limit: Int): Float?
+
+    @Query("SELECT AVG(flightTime) FROM (SELECT flightTime FROM keystroke_data WHERE sessionId = :sessionId AND isLoginBaseline = 0 ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun getRecentAvgFlightTime(sessionId: String, limit: Int): Float?
     
     @Query("DELETE FROM keystroke_data WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
@@ -68,6 +80,15 @@ interface TouchDao {
     
     @Query("SELECT COUNT(*) FROM touch_data WHERE sessionId = :sessionId AND touchType = :touchType")
     suspend fun countByType(sessionId: String, touchType: TouchType): Int
+
+    @Query("SELECT COUNT(*) FROM touch_data WHERE sessionId = :sessionId")
+    suspend fun getRecentTouchCount(sessionId: String): Int
+
+    @Query("SELECT AVG(pressure) FROM (SELECT pressure FROM touch_data WHERE sessionId = :sessionId ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun getRecentAvgPressure(sessionId: String, limit: Int): Float?
+
+    @Query("SELECT AVG(velocity) FROM (SELECT velocity FROM touch_data WHERE sessionId = :sessionId AND touchType IN ('SWIPE_UP', 'SWIPE_DOWN', 'SWIPE_LEFT', 'SWIPE_RIGHT') ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun getRecentAvgSwipeVelocity(sessionId: String, limit: Int): Float?
     
     @Query("DELETE FROM touch_data WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
@@ -111,6 +132,15 @@ interface MotionDao {
         LIMIT 1
     """)
     suspend fun getMostCommonDeviceState(sessionId: String): String?
+
+    @Query("SELECT COUNT(*) FROM motion_data WHERE sessionId = :sessionId")
+    suspend fun getRecentMotionCount(sessionId: String): Int
+
+    @Query("SELECT AVG(pitch) FROM (SELECT pitch FROM motion_data WHERE sessionId = :sessionId ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun getRecentAvgPitch(sessionId: String, limit: Int): Float?
+
+    @Query("SELECT AVG(roll) FROM (SELECT roll FROM motion_data WHERE sessionId = :sessionId ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun getRecentAvgRoll(sessionId: String, limit: Int): Float?
     
     @Query("DELETE FROM motion_data WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)

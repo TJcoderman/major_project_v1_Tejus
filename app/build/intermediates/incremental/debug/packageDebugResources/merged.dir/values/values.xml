@@ -8,7 +8,7 @@
     <color name="ic_launcher_background">#0D1117</color>
     <color name="obsidian">#0D1117</color>
     <color name="obsidian_light">#161B22</color>
-    <string name="app_name">SecureBank</string>
+    <string name="app_name">SecureBank Dev</string>
     <string name="available_balance">Available Balance</string>
     <string name="continue_button">Continue</string>
     <string name="dashboard_title">Dashboard</string>

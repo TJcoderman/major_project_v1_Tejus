@@ -1,6 +1,7 @@
 package com.securebank.app.domain
 
 import android.content.Context
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -27,6 +28,10 @@ import kotlin.math.max
 class MLModelInference @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    companion object {
+        private const val TAG = "MLModelInference"
+    }
+
     private var model: ModelData? = null
     private var isLoaded = false
 
@@ -66,13 +71,35 @@ class MLModelInference @Inject constructor(
         return try {
             val json = context.assets.open("ml/behavioral_auth_model.json")
                 .bufferedReader().use { it.readText() }
-            model = Gson().fromJson(json, ModelData::class.java)
+            val parsedModel = Gson().fromJson(json, ModelData::class.java)
+            validateModel(parsedModel)
+            model = parsedModel
             isLoaded = model != null
+            if (isLoaded) {
+                Log.d(TAG, "Loaded behavioral_auth_model.json with ${model?.nFeatures} features")
+            }
             isLoaded
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to load behavioral_auth_model.json", e)
+            model = null
             isLoaded = false
             false
         }
+    }
+
+    private fun validateModel(modelData: ModelData?) {
+        requireNotNull(modelData) { "Model JSON parsed to null" }
+        require(modelData.nFeatures > 0) { "Model n_features must be positive" }
+        require(modelData.featureNames.size == modelData.nFeatures) {
+            "Feature name count ${modelData.featureNames.size} does not match n_features ${modelData.nFeatures}"
+        }
+        require(modelData.scaler.means.size == modelData.nFeatures) {
+            "Scaler means count ${modelData.scaler.means.size} does not match n_features ${modelData.nFeatures}"
+        }
+        require(modelData.scaler.scales.size == modelData.nFeatures) {
+            "Scaler scales count ${modelData.scaler.scales.size} does not match n_features ${modelData.nFeatures}"
+        }
+        require(modelData.layers.isNotEmpty()) { "Model has no layers" }
     }
 
     /**
@@ -138,11 +165,12 @@ class MLModelInference @Inject constructor(
     /**
      * Classify a session as genuine or impostor.
      *
-     * @return Pair(isGenuine, confidence)
+     * @return Pair(isGenuine, confidence), or null if model is not loaded / prediction failed.
+     *         Returning null instead of fail-open prevents treating errors as "genuine".
      */
-    fun classify(features: FloatArray): Pair<Boolean, Float> {
+    fun classify(features: FloatArray): Pair<Boolean, Float>? {
         val score = predict(features)
-        if (score < 0f) return Pair(true, 0f) // Fail open if model not loaded
+        if (score < 0f) return null // Model not loaded or input invalid — unavailable, not "genuine"
         val isGenuine = score >= (model?.threshold ?: 0.5f)
         val confidence = if (isGenuine) score else (1f - score)
         return Pair(isGenuine, confidence)

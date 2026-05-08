@@ -45,6 +45,10 @@ class BehavioralRepository @Inject constructor(
         val avgFlight = keystrokeDao.getAvgFlightTime(sessionId, isBaseline) ?: 0f
         return Pair(avgDwell, avgFlight)
     }
+
+    suspend fun getRecentKeystrokeData(sessionId: String, limit: Int): List<com.securebank.app.data.model.KeystrokeData> {
+        return keystrokeDao.getRecentSessionKeystrokes(sessionId, limit)
+    }
     
     // ========================
     // TOUCH OPERATIONS
@@ -130,6 +134,62 @@ class BehavioralRepository @Inject constructor(
         return sessionDao.getUserSessions(userId)
     }
     
+    // ========================
+    // WINDOWED / RECENT OPERATIONS
+    // ========================
+
+    /**
+     * Returns recent keystroke metrics (dwell, flight) from the latest [windowSize] non-baseline
+     * samples. Returns null if there are fewer than [minSamples] to avoid noisy comparisons.
+     */
+    suspend fun getRecentKeystrokeMetrics(
+        sessionId: String,
+        windowSize: Int,
+        minSamples: Int
+    ): Pair<Float, Float>? {
+        val count = keystrokeDao.getRecentKeystrokeCount(sessionId)
+        if (count < minSamples) return null
+        val avgDwell = keystrokeDao.getRecentAvgDwellTime(sessionId, windowSize) ?: return null
+        val avgFlight = keystrokeDao.getRecentAvgFlightTime(sessionId, windowSize) ?: return null
+        return Pair(avgDwell, avgFlight)
+    }
+
+    /**
+     * Returns recent touch metrics (pressure, swipe velocity) from the latest [windowSize]
+     * samples. Returns null if there are fewer than [minSamples].
+     */
+    suspend fun getRecentTouchMetrics(
+        sessionId: String,
+        windowSize: Int,
+        minSamples: Int
+    ): Pair<Float, Float>? {
+        val count = touchDao.getRecentTouchCount(sessionId)
+        if (count < minSamples) return null
+        val avgPressure = touchDao.getRecentAvgPressure(sessionId, windowSize) ?: return null
+        val avgVelocity = touchDao.getRecentAvgSwipeVelocity(sessionId, windowSize) ?: 0f
+        return Pair(avgPressure, avgVelocity)
+    }
+
+    /**
+     * Returns recent motion metrics (pitch, roll, state) from the latest [windowSize]
+     * samples. Returns null if there are fewer than [minSamples].
+     */
+    suspend fun getRecentMotionMetrics(
+        sessionId: String,
+        windowSize: Int,
+        minSamples: Int
+    ): Triple<Float, Float, DeviceState?>? {
+        val count = motionDao.getRecentMotionCount(sessionId)
+        if (count < minSamples) return null
+        val avgPitch = motionDao.getRecentAvgPitch(sessionId, windowSize) ?: return null
+        val avgRoll = motionDao.getRecentAvgRoll(sessionId, windowSize) ?: return null
+        val commonStateString = motionDao.getMostCommonDeviceState(sessionId)
+        val commonState = commonStateString?.let {
+            try { DeviceState.valueOf(it) } catch (e: Exception) { null }
+        }
+        return Triple(avgPitch, avgRoll, commonState)
+    }
+
     // ========================
     // CLEANUP OPERATIONS
     // ========================

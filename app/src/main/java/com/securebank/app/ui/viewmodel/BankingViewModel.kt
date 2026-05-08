@@ -20,6 +20,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -53,16 +56,28 @@ class BankingViewModel @Inject constructor(
     val currentRiskScore: StateFlow<Float> = behaviorAnalyzer.currentRiskScore
     val currentRiskLevel: StateFlow<RiskLevel> = behaviorAnalyzer.currentRiskLevel
     
+    // ML Status
+    val isMLReady: StateFlow<Boolean> = behaviorAnalyzer.mlReadyState
+    val debugExplainabilityState: StateFlow<DebugExplainabilityState> = behaviorAnalyzer.debugExplainabilityState
+    
     private val _showSecurityAlert = MutableStateFlow(false)
     val showSecurityAlert: StateFlow<Boolean> = _showSecurityAlert.asStateFlow()
     
     private val _securityAlertMessage = MutableStateFlow("")
     val securityAlertMessage: StateFlow<String> = _securityAlertMessage.asStateFlow()
+
+    private val _alertSeverity = MutableStateFlow(AlertSeverity.MEDIUM)
+    val alertSeverity: StateFlow<AlertSeverity> = _alertSeverity.asStateFlow()
+
+    // One-shot event: when true, NavGraph must navigate to login and reset to false.
+    private val _forceLogoutEvent = MutableStateFlow(false)
+    val forceLogoutEvent: StateFlow<Boolean> = _forceLogoutEvent.asStateFlow()
     
     // Behavioral data collection state
     private var isCollecting = false
     private var sensorCollectionJob: Job? = null
     private var touchCollectionJob: Job? = null
+    private var keystrokeCollectionJob: Job? = null
     private var riskAssessmentJob: Job? = null
     private var currentSessionId: String = ""
     
@@ -79,12 +94,19 @@ class BankingViewModel @Inject constructor(
     
     private val _liveKeystrokeData = MutableStateFlow<KeystrokeData?>(null)
     val liveKeystrokeData: StateFlow<KeystrokeData?> = _liveKeystrokeData.asStateFlow()
+
+    private val _debugCounters = MutableStateFlow(DebugCollectionCounters())
+    val debugCounters: StateFlow<DebugCollectionCounters> = _debugCounters.asStateFlow()
+
+    private val _debugEvents = MutableStateFlow<List<String>>(emptyList())
+    val debugEvents: StateFlow<List<String>> = _debugEvents.asStateFlow()
     
     /**
      * Initializes banking data and starts behavioral collection.
      */
     fun initialize(user: User, sessionId: String) {
         currentSessionId = sessionId
+        addDebugEvent("Session created for ${user.username}")
         
         viewModelScope.launch {
             // Load user data
@@ -108,6 +130,7 @@ class BankingViewModel @Inject constructor(
         
         isCollecting = true
         currentSessionId = sessionId
+        addDebugEvent("Behavioral collectors started")
         
         // Start touch collection
         touchDataCollector.startCollection(sessionId)
@@ -120,14 +143,16 @@ class BankingViewModel @Inject constructor(
             touchDataCollector.touchEvents.collect { touchData ->
                 _liveTouchData.value = touchData
                 behavioralRepository.saveTouch(touchData)
+                incrementCounters(touches = 1, databaseWrites = 1)
             }
         }
         
-        // Collect keystroke events
-        viewModelScope.launch {
+        // Collect keystroke events — store the Job so we can cancel it (item 3)
+        keystrokeCollectionJob = viewModelScope.launch {
             keystrokeCollector.keystrokeEvents.collect { keystrokeData ->
                 _liveKeystrokeData.value = keystrokeData
                 behavioralRepository.saveKeystroke(keystrokeData)
+                incrementCounters(keystrokes = 1, databaseWrites = 1)
             }
         }
         
@@ -153,18 +178,24 @@ class BankingViewModel @Inject constructor(
                         
                         when (recommendation) {
                             SecurityRecommendation.REQUEST_REAUTHENTICATION -> {
+                                _alertSeverity.value = AlertSeverity.HIGH
                                 _securityAlertMessage.value = "Real-time anomaly detected. Please verify identity."
                                 _showSecurityAlert.value = true
                                 vibrate()
                             }
                             SecurityRecommendation.FORCE_LOGOUT -> {
+                                _alertSeverity.value = AlertSeverity.CRITICAL
                                 _securityAlertMessage.value = "Critical motion anomaly detected. Session terminated."
                                 _showSecurityAlert.value = true
                                 vibrate()
+                                stopBehavioralCollection()
+                                behaviorAnalyzer.reset()
+                                _forceLogoutEvent.value = true
                             }
                             SecurityRecommendation.SHOW_WARNING -> {
+                                _alertSeverity.value = AlertSeverity.MEDIUM
                                 if (_debugMode.value) {
-                                    showToast("⚠️ Motion anomaly detected!")
+                                    showToast("Warning: Motion anomaly detected!")
                                 }
                             }
                             else -> {}
@@ -176,6 +207,7 @@ class BankingViewModel @Inject constructor(
                     // Batch save every 10 readings to reduce database writes
                     if (motionBuffer.size >= 10) {
                         behavioralRepository.saveMotionBatch(motionBuffer.toList())
+                        incrementCounters(motionSamples = motionBuffer.size, databaseWrites = motionBuffer.size)
                         motionBuffer.clear()
                     }
                 }
@@ -191,6 +223,7 @@ class BankingViewModel @Inject constructor(
      */
     fun stopBehavioralCollection() {
         isCollecting = false
+        addDebugEvent("Behavioral collectors stopped")
         
         touchDataCollector.stopCollection()
         keystrokeCollector.stopCollection()
@@ -198,7 +231,47 @@ class BankingViewModel @Inject constructor(
         
         sensorCollectionJob?.cancel()
         touchCollectionJob?.cancel()
+        keystrokeCollectionJob?.cancel()
         riskAssessmentJob?.cancel()
+
+        sensorCollectionJob = null
+        touchCollectionJob = null
+        keystrokeCollectionJob = null
+        riskAssessmentJob = null
+    }
+
+    /**
+     * Pauses behavioral collection when the app goes to background.
+     * Stops sensor/touch collectors but preserves session state so
+     * resumeBehavioralCollection() can restart them.
+     */
+    fun pauseBehavioralCollection() {
+        if (!isCollecting) return
+        isCollecting = false
+        addDebugEvent("Monitoring paused (app backgrounded)")
+
+        touchDataCollector.stopCollection()
+        sensorDataCollector.stopCollection()
+
+        sensorCollectionJob?.cancel()
+        touchCollectionJob?.cancel()
+        keystrokeCollectionJob?.cancel()
+        riskAssessmentJob?.cancel()
+
+        sensorCollectionJob = null
+        touchCollectionJob = null
+        keystrokeCollectionJob = null
+        riskAssessmentJob = null
+    }
+
+    /**
+     * Resumes behavioral collection when the app returns to foreground.
+     * Only restarts if we have an active session.
+     */
+    fun resumeBehavioralCollection() {
+        if (isCollecting || currentSessionId.isEmpty()) return
+        addDebugEvent("Monitoring resumed (app foregrounded)")
+        startBehavioralCollection(currentSessionId)
     }
     
     /**
@@ -211,10 +284,12 @@ class BankingViewModel @Inject constructor(
             
             // Update baseline with initial touch/motion data
             behaviorAnalyzer.updateInitialBaseline(currentSessionId)
+            addDebugEvent("Touch and motion baseline updated")
             
             // Periodic assessment every 15 seconds
             while (isCollecting) {
                 val assessment = behaviorAnalyzer.performRiskAssessment(currentSessionId)
+                addDebugEvent("Risk ${assessment.riskLevel.name}: ${(assessment.overallRiskScore * 100).toInt()}% -> ${assessment.recommendation.name}")
                 handleRiskAssessment(assessment)
                 delay(15000)
             }
@@ -223,6 +298,8 @@ class BankingViewModel @Inject constructor(
     
     /**
      * Handles the result of a risk assessment.
+     * Enforces security decisions: FORCE_LOGOUT actually terminates the session,
+     * REQUEST_REAUTHENTICATION shows a non-dismissible reauth dialog.
      */
     private fun handleRiskAssessment(assessment: RiskAssessment) {
         when (assessment.recommendation) {
@@ -230,28 +307,48 @@ class BankingViewModel @Inject constructor(
                 // All good, no action needed
             }
             SecurityRecommendation.SHOW_WARNING -> {
+                _alertSeverity.value = AlertSeverity.MEDIUM
                 if (_debugMode.value) {
-                    showToast("⚠️ Medium risk detected: ${(assessment.overallRiskScore * 100).toInt()}%")
+                    showToast("Warning: Medium risk detected: ${(assessment.overallRiskScore * 100).toInt()}%")
                 }
             }
             SecurityRecommendation.REQUEST_REAUTHENTICATION -> {
+                addDebugEvent("Action required: reauthentication")
+                _alertSeverity.value = AlertSeverity.HIGH
                 _securityAlertMessage.value = "Unusual behavior detected. For your security, please verify your identity."
                 _showSecurityAlert.value = true
                 vibrate()
             }
             SecurityRecommendation.FORCE_LOGOUT -> {
+                addDebugEvent("Action required: force logout")
+                _alertSeverity.value = AlertSeverity.CRITICAL
                 _securityAlertMessage.value = "Session security compromised. You will be logged out for your protection."
                 _showSecurityAlert.value = true
                 vibrate()
+                // Actually enforce: stop collectors and trigger navigation
+                stopBehavioralCollection()
+                behaviorAnalyzer.reset()
+                // Signal NavGraph to navigate to login
+                _forceLogoutEvent.value = true
             }
         }
     }
     
     /**
-     * Dismisses the security alert.
+     * Called by NavGraph after processing the force logout event.
+     */
+    fun acknowledgeForceLogout() {
+        _forceLogoutEvent.value = false
+        _showSecurityAlert.value = false
+    }
+
+    /**
+     * Dismisses the security alert (only allowed for non-critical severity).
      */
     fun dismissSecurityAlert() {
-        _showSecurityAlert.value = false
+        if (_alertSeverity.value != AlertSeverity.CRITICAL) {
+            _showSecurityAlert.value = false
+        }
     }
     
     /**
@@ -336,6 +433,52 @@ class BankingViewModel @Inject constructor(
      */
     fun toggleDebugMode() {
         _debugMode.value = !_debugMode.value
+    }
+
+    fun simulateTypingAnomaly() {
+        behaviorAnalyzer.applyDebugScenario("Typing rhythm anomaly", 0.68f)
+        addDebugEvent("Demo: typing anomaly injected")
+    }
+
+    fun simulateTouchAnomaly() {
+        behaviorAnalyzer.applyDebugScenario("Touch pressure anomaly", 0.58f)
+        addDebugEvent("Demo: touch anomaly injected")
+    }
+
+    fun simulateMotionAnomaly() {
+        behaviorAnalyzer.applyDebugScenario("Motion orientation anomaly", 0.72f)
+        addDebugEvent("Demo: motion anomaly injected")
+    }
+
+    fun simulateCriticalRisk() {
+        behaviorAnalyzer.applyDebugScenario("Critical multi-signal anomaly", 0.88f)
+        addDebugEvent("Demo: critical risk injected")
+    }
+
+    fun resetDemoRisk() {
+        behaviorAnalyzer.applyDebugScenario("Risk reset", 0.05f)
+        addDebugEvent("Demo: risk reset")
+    }
+
+    private fun incrementCounters(
+        keystrokes: Int = 0,
+        touches: Int = 0,
+        motionSamples: Int = 0,
+        databaseWrites: Int = 0
+    ) {
+        val current = _debugCounters.value
+        _debugCounters.value = current.copy(
+            keystrokes = current.keystrokes + keystrokes,
+            touches = current.touches + touches,
+            motionSamples = current.motionSamples + motionSamples,
+            databaseWrites = current.databaseWrites + databaseWrites,
+            lastEventTimestamp = System.currentTimeMillis()
+        )
+    }
+
+    private fun addDebugEvent(message: String) {
+        val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        _debugEvents.value = (listOf("$timestamp  $message") + _debugEvents.value).take(8)
     }
     
     /**

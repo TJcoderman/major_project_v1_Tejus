@@ -49,17 +49,10 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val navController = rememberNavController()
                     
-                    // Handle lifecycle for sensor management
-                    LifecycleHandler(
-                        onPause = {
-                            // Stop sensor collection when app goes to background
-                            sensorDataCollector.stopCollection()
-                            touchDataCollector.stopCollection()
-                        },
-                        onResume = {
-                            // Sensors will be restarted by ViewModel if session is active
-                        }
-                    )
+                    // Lifecycle management for behavioral collectors is now handled
+                    // by BankingViewModel via the NavGraph's lifecycle observer.
+                    // Keeping the LifecycleHandler for potential future use.
+                    LifecycleHandler()
                     
                     SecureBankNavGraph(
                         navController = navController,

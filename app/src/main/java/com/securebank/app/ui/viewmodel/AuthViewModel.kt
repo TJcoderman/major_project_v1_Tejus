@@ -1,11 +1,11 @@
 package com.securebank.app.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securebank.app.data.model.AuthState
 import com.securebank.app.data.model.BehavioralSession
 import com.securebank.app.data.model.KeystrokeData
-import com.securebank.app.data.model.PinKeystrokeEvent
 import com.securebank.app.data.model.User
 import com.securebank.app.data.repository.BehavioralRepository
 import com.securebank.app.data.repository.UserRepository
@@ -43,16 +43,18 @@ class AuthViewModel @Inject constructor(
     // Keystroke collection for baseline
     private var sessionId: String = ""
     private var keystrokesCollected = 0
+    private var keystrokeCollectionJob: kotlinx.coroutines.Job? = null
     
     init {
         // Generate initial session ID for baseline collection
         sessionId = UUID.randomUUID().toString()
         keystrokeCollector.startCollection(sessionId, isBaseline = true)
 
-        // Observe keystroke events during login
-        viewModelScope.launch {
+        // Observe keystroke events during login — store the Job so we can cancel
+        // it after successful login to prevent duplicate writes with BankingViewModel.
+        keystrokeCollectionJob = viewModelScope.launch {
             keystrokeCollector.keystrokeEvents.collect { keystrokeData ->
-                // Always save keystrokes during login phase (baseline mode)
+                // Only save keystrokes while in baseline/login phase
                 behavioralRepository.saveKeystroke(keystrokeData)
                 keystrokesCollected++
             }
@@ -109,6 +111,10 @@ class AuthViewModel @Inject constructor(
             if (user != null) {
                 // Stop baseline collection
                 keystrokeCollector.stopCollection()
+                // Cancel the login-phase keystroke collection job to prevent
+                // duplicate writes once BankingViewModel starts its own collector.
+                keystrokeCollectionJob?.cancel()
+                keystrokeCollectionJob = null
                 
                 // Create behavioral session
                 val session = BehavioralSession(
@@ -123,28 +129,13 @@ class AuthViewModel @Inject constructor(
                 // Initialize behavior analyzer with baseline
                 behaviorAnalyzer.initializeBaseline(sessionId)
 
-                // Set ML enrollment baseline from login keystrokes
-                val baselineKs = keystrokeCollector.getBaselineKeystrokes()
-                if (baselineKs.size >= 6) {
-                    val pinEvents = baselineKs.mapIndexed { index, ks ->
-                        PinKeystrokeEvent(
-                            sessionId = sessionId,
-                            timestamp = ks.timestamp,
-                            digit = index % 10,
-                            keyDownTime = ks.timestamp,
-                            keyUpTime = ks.timestamp + ks.dwellTime,
-                            dwellTime = ks.dwellTime,
-                            flightTime = ks.flightTime,
-                            touchX = 0f,
-                            touchY = 0f,
-                            touchSize = 0f,
-                            pinAttemptNumber = 1
-                        )
-                    }
-                    val recentTouches = behavioralRepository.getRecentTouches(sessionId, 200)
-                    val recentMotion = behavioralRepository.getRecentMotion(sessionId, 500)
-                    behaviorAnalyzer.setMLEnrollmentBaseline(pinEvents, recentTouches, recentMotion)
-                }
+                // ML enrollment: The banking demo does not use CustomPinPad for
+                // login, so we cannot collect real PIN keystroke features.
+                // ML enrollment will remain not-ready and the system will fall
+                // back to statistical Z-score detection only.
+                // Real ML enrollment happens through the experiment module's
+                // CustomPinPad flow.
+                Log.d("AuthViewModel", "ML enrollment skipped: banking demo uses password login, not PIN. Statistical detection active.")
                 
                 _authState.value = AuthState(
                     isAuthenticated = true,
@@ -197,6 +188,14 @@ class AuthViewModel @Inject constructor(
             // Start collection for next user
             sessionId = UUID.randomUUID().toString()
             keystrokeCollector.startCollection(sessionId, isBaseline = true)
+
+            // Re-launch keystroke collection for the next login attempt
+            keystrokeCollectionJob = viewModelScope.launch {
+                keystrokeCollector.keystrokeEvents.collect { keystrokeData ->
+                    behavioralRepository.saveKeystroke(keystrokeData)
+                    keystrokesCollected++
+                }
+            }
         }
     }
     

@@ -88,6 +88,10 @@ class ExperimentViewModel @Inject constructor(
     // Collected PIN keystrokes for current session
     private val currentPinKeystrokes = mutableListOf<PinKeystrokeEvent>()
 
+    // Collection jobs (stored so we can cancel to avoid leaks/duplicates)
+    private var sensorCollectionJob: kotlinx.coroutines.Job? = null
+    private var keystrokeCollectionJob: kotlinx.coroutines.Job? = null
+
     // ========================
     // PARTICIPANT MANAGEMENT
     // ========================
@@ -142,14 +146,16 @@ class ExperimentViewModel @Inject constructor(
         touchDataCollector.startCollection(sessionId)
 
         // Start sensor collection
-        viewModelScope.launch {
+        sensorCollectionJob?.cancel()
+        sensorCollectionJob = viewModelScope.launch {
             sensorDataCollector.startCollection(sessionId).collect { motionData ->
                 behavioralRepository.saveMotion(motionData)
             }
         }
 
         // Collect keystroke events
-        viewModelScope.launch {
+        keystrokeCollectionJob?.cancel()
+        keystrokeCollectionJob = viewModelScope.launch {
             keystrokeCollector.keystrokeEvents.collect { keystrokeData ->
                 behavioralRepository.saveKeystroke(keystrokeData)
             }
@@ -294,6 +300,12 @@ class ExperimentViewModel @Inject constructor(
         touchDataCollector.stopCollection()
         sensorDataCollector.stopCollection()
 
+        // Cancel collection jobs to prevent duplicates on next session
+        sensorCollectionJob?.cancel()
+        keystrokeCollectionJob?.cancel()
+        sensorCollectionJob = null
+        keystrokeCollectionJob = null
+
         // Update session
         val completedSession = session.copy(
             endTime = System.currentTimeMillis(),
@@ -403,6 +415,12 @@ class ExperimentViewModel @Inject constructor(
     }
 
     fun resetSession() {
+        // Cancel any running collection jobs
+        sensorCollectionJob?.cancel()
+        keystrokeCollectionJob?.cancel()
+        sensorCollectionJob = null
+        keystrokeCollectionJob = null
+
         _currentSession.value = null
         _currentTask.value = ExperimentTaskType.PIN_ENTRY
         _currentPin.value = ""

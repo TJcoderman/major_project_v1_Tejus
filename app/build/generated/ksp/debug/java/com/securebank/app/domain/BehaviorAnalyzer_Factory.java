@@ -30,25 +30,36 @@ public final class BehaviorAnalyzer_Factory implements Factory<BehaviorAnalyzer>
 
   private final Provider<KeystrokeCollector> keystrokeCollectorProvider;
 
+  private final Provider<MLModelInference> mlModelInferenceProvider;
+
+  private final Provider<MLFeatureExtractor> mlFeatureExtractorProvider;
+
   public BehaviorAnalyzer_Factory(Provider<BehavioralRepository> behavioralRepositoryProvider,
-      Provider<KeystrokeCollector> keystrokeCollectorProvider) {
+      Provider<KeystrokeCollector> keystrokeCollectorProvider,
+      Provider<MLModelInference> mlModelInferenceProvider,
+      Provider<MLFeatureExtractor> mlFeatureExtractorProvider) {
     this.behavioralRepositoryProvider = behavioralRepositoryProvider;
     this.keystrokeCollectorProvider = keystrokeCollectorProvider;
+    this.mlModelInferenceProvider = mlModelInferenceProvider;
+    this.mlFeatureExtractorProvider = mlFeatureExtractorProvider;
   }
 
   @Override
   public BehaviorAnalyzer get() {
-    return newInstance(behavioralRepositoryProvider.get(), keystrokeCollectorProvider.get());
+    return newInstance(behavioralRepositoryProvider.get(), keystrokeCollectorProvider.get(), mlModelInferenceProvider.get(), mlFeatureExtractorProvider.get());
   }
 
   public static BehaviorAnalyzer_Factory create(
       Provider<BehavioralRepository> behavioralRepositoryProvider,
-      Provider<KeystrokeCollector> keystrokeCollectorProvider) {
-    return new BehaviorAnalyzer_Factory(behavioralRepositoryProvider, keystrokeCollectorProvider);
+      Provider<KeystrokeCollector> keystrokeCollectorProvider,
+      Provider<MLModelInference> mlModelInferenceProvider,
+      Provider<MLFeatureExtractor> mlFeatureExtractorProvider) {
+    return new BehaviorAnalyzer_Factory(behavioralRepositoryProvider, keystrokeCollectorProvider, mlModelInferenceProvider, mlFeatureExtractorProvider);
   }
 
   public static BehaviorAnalyzer newInstance(BehavioralRepository behavioralRepository,
-      KeystrokeCollector keystrokeCollector) {
-    return new BehaviorAnalyzer(behavioralRepository, keystrokeCollector);
+      KeystrokeCollector keystrokeCollector, MLModelInference mlModelInference,
+      MLFeatureExtractor mlFeatureExtractor) {
+    return new BehaviorAnalyzer(behavioralRepository, keystrokeCollector, mlModelInference, mlFeatureExtractor);
   }
 }
