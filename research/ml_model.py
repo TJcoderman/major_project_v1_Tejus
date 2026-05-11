@@ -104,9 +104,23 @@ def extract_raw_features(participant_dir, prefix):
         durations = [float(r["duration_ms"]) for r in touch_rows]
         velocities = [float(r["velocity"]) for r in touch_rows]
         accs = [float(r["acceleration"]) for r in touch_rows]
+        pressures = [float(r.get("pressure", 0.0)) for r in touch_rows]
+        touch_sizes = [float(r.get("touch_size", 0.0)) for r in touch_rows]
+        touch_areas = [float(r.get("touch_area", r.get("touch_size", 0.0))) for r in touch_rows]
+        holds = [float(r.get("hold_duration_ms", 0.0)) for r in touch_rows]
         taps = sum(1 for r in touch_rows if r["touch_type"] == "TAP")
+        swipes = sum(1 for r in touch_rows if r["touch_type"] in ["SWIPE_UP", "SWIPE_DOWN", "SWIPE_LEFT", "SWIPE_RIGHT", "SCROLL"])
+        long_presses = sum(1 for r in touch_rows if r["touch_type"] == "LONG_PRESS")
         
         features.update({
+            "touch_pressure_mean": np.mean(pressures),
+            "touch_pressure_std": np.std(pressures),
+            "touch_area_mean": np.mean(touch_areas),
+            "touch_area_std": np.std(touch_areas),
+            "touch_size_mean": np.mean(touch_sizes),
+            "touch_size_std": np.std(touch_sizes),
+            "touch_hold_mean": np.mean(holds),
+            "touch_hold_std": np.std(holds),
             "touch_duration_mean": np.mean(durations),
             "touch_duration_std": np.std(durations),
             "touch_velocity_mean": np.mean(velocities),
@@ -115,6 +129,8 @@ def extract_raw_features(participant_dir, prefix):
             "touch_accel_mean": np.mean(accs),
             "touch_accel_std": np.std(accs),
             "touch_tap_ratio": taps / len(touch_rows),
+            "touch_swipe_ratio": swipes / len(touch_rows),
+            "touch_long_press_ratio": long_presses / len(touch_rows),
             "touch_count": len(touch_rows),
         })
     

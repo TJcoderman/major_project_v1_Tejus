@@ -47,6 +47,9 @@ class BehaviorAnalyzer @Inject constructor(
 
         // Analysis window (analyze last N data points)
         const val ANALYSIS_WINDOW = 50
+        const val MIN_PROFILE_ML_SAMPLES = 18
+        const val TOUCH_TRUST_RAMP_SAMPLES = 8
+        const val TOUCH_TRUST_RAMP_MS = 6000L
 
         // ML model blending weight (0.0 = Z-score only, 1.0 = ML only)
         // 0.6 gives ML majority since it was trained on richer feature set
@@ -77,7 +80,20 @@ class BehaviorAnalyzer @Inject constructor(
     private var baselineKeystrokeFlight: Float = 0f
     private var baselineKeystrokeFlightStdDev: Float = 1f
     private var baselineTouchPressure: Float = 0f
+    private var baselineTouchPressureStdDev: Float = 0.1f
+    private var baselineTouchArea: Float = 0f
+    private var baselineTouchAreaStdDev: Float = 0.1f
+    private var baselineTouchDuration: Float = 150f
+    private var baselineTouchDurationStdDev: Float = 60f
+    private var baselineHoldDuration: Float = 0f
+    private var baselineHoldDurationStdDev: Float = 80f
     private var baselineSwipeVelocity: Float = 0f
+    private var baselineSwipeVelocityStdDev: Float = 150f
+    private var baselineSwipeAcceleration: Float = 0f
+    private var baselineSwipeAccelerationStdDev: Float = 150f
+    private var baselineTapRatio: Float = 0f
+    private var baselineSwipeRatio: Float = 0f
+    private var baselineLongPressRatio: Float = 0f
     private var baselineDevicePitch: Float = 0f
     private var baselineDeviceRoll: Float = 0f
     private var baselineDeviceState: DeviceState = DeviceState.UNKNOWN
@@ -92,6 +108,13 @@ class BehaviorAnalyzer @Inject constructor(
     // Session tracking
     private var currentSessionId: String = ""
     private var analysisCount = 0
+    private var isProfileBased = false  // True when baseline comes from enrollment profile
+    private var consecutiveAbnormalTouches = 0
+    private var consecutiveHighPressureTouches = 0
+    private var consecutiveLongPressTouches = 0
+    private var sessionStartedAt: Long = 0L
+    private var realTimeTouchSamples = 0
+    private var saturatedPressureSamples = 0
 
     // ML model state
     private var mlModelLoaded = false
@@ -102,50 +125,122 @@ class BehaviorAnalyzer @Inject constructor(
     private var lastExtractedFeatureCount = 0
     
     /**
-     * Initializes the analyzer with baseline data from login.
+     * Initializes the analyzer with baseline data.
+     * If a BehavioralProfile is provided, uses stored enrollment values.
+     * Otherwise, falls back to login keystroke + default heuristics.
      */
-    suspend fun initializeBaseline(sessionId: String) {
+    suspend fun initializeBaseline(sessionId: String, profile: BehavioralProfile? = null) {
         currentSessionId = sessionId
         analysisCount = 0
+        sessionStartedAt = System.currentTimeMillis()
+        realTimeTouchSamples = 0
+        saturatedPressureSamples = 0
+        consecutiveAbnormalTouches = 0
+        consecutiveHighPressureTouches = 0
+        consecutiveLongPressTouches = 0
 
-        // Get baseline keystroke metrics directly from collector memory
-        val baselineKeystrokes = keystrokeCollector.getBaselineKeystrokes()
+        if (profile != null) {
+            // ── Profile-based initialization (from enrollment) ──
+            loadUserProfile(profile)
+            isProfileBased = true
+            Log.d(TAG, "Baseline initialized from enrolled profile (${profile.sampleCount} samples)")
+        } else {
+            // ── Provisional baseline (legacy: from login keystrokes) ──
+            isProfileBased = false
+            val baselineKeystrokes = keystrokeCollector.getBaselineKeystrokes()
 
-        if (baselineKeystrokes.isNotEmpty()) {
-            // Calculate Mean
-            baselineKeystrokeDwell = baselineKeystrokes.map { it.dwellTime }.average().toFloat()
-            baselineKeystrokeFlight = baselineKeystrokes.map { it.flightTime }.average().toFloat()
+            if (baselineKeystrokes.isNotEmpty()) {
+                baselineKeystrokeDwell = baselineKeystrokes.map { it.dwellTime }.average().toFloat()
+                baselineKeystrokeFlight = baselineKeystrokes.map { it.flightTime }.average().toFloat()
+                baselineKeystrokeDwellStdDev = calculateStdDev(baselineKeystrokes.map { it.dwellTime.toFloat() }, baselineKeystrokeDwell)
+                baselineKeystrokeFlightStdDev = calculateStdDev(baselineKeystrokes.map { it.flightTime.toFloat() }, baselineKeystrokeFlight)
+                baselineKeystrokeDwellStdDev = baselineKeystrokeDwellStdDev.coerceAtLeast(5f)
+                baselineKeystrokeFlightStdDev = baselineKeystrokeFlightStdDev.coerceAtLeast(5f)
+            }
 
-            // Calculate Standard Deviation
-            baselineKeystrokeDwellStdDev = calculateStdDev(baselineKeystrokes.map { it.dwellTime.toFloat() }, baselineKeystrokeDwell)
-            baselineKeystrokeFlightStdDev = calculateStdDev(baselineKeystrokes.map { it.flightTime.toFloat() }, baselineKeystrokeFlight)
-
-            // Enforce minimum StdDev to avoid division by zero or overly sensitive triggers
-            baselineKeystrokeDwellStdDev = baselineKeystrokeDwellStdDev.coerceAtLeast(5f)
-            baselineKeystrokeFlightStdDev = baselineKeystrokeFlightStdDev.coerceAtLeast(5f)
+            // Set default baseline for touch and motion
+            baselineTouchPressure = 0.5f
+            baselineSwipeVelocity = 500f
+            baselineDevicePitch = 45f
+            baselineDeviceRoll = 0f
+            baselineDeviceState = DeviceState.HELD_IN_HAND
         }
-
-        // Set default baseline for touch and motion (will be updated as data comes in)
-        baselineTouchPressure = 0.5f  // Default middle value
-        baselineSwipeVelocity = 500f  // Default reasonable velocity
-        baselineDevicePitch = 45f     // Default holding angle
-        baselineDeviceRoll = 0f
-        baselineDeviceState = DeviceState.HELD_IN_HAND
 
         _currentRiskScore.value = 0f
         _currentRiskLevel.value = RiskLevel.LOW
 
         // Initialize ML model
         initializeMLModel()
+        if (profile != null && mlModelLoaded) {
+            if (profile.isUsableForML()) {
+                mlFeatureExtractor.setEnrollmentBaseline(profile)
+                mlEnrollmentReady = mlFeatureExtractor.hasEnrollmentBaseline()
+                lastMLPrediction = "Ready"
+            } else {
+                mlFeatureExtractor.clearBaseline()
+                mlEnrollmentReady = false
+                lastMLPrediction = "Enrollment profile too sparse"
+            }
+            updateMLReadyState()
+        }
+
+        val baselineType = if (isProfileBased) "Enrolled profile" else "Provisional (login)"
         publishDebugState(
-            sessionState = "Baseline initialized",
+            sessionState = "Baseline initialized ($baselineType)",
             decision = "Monitoring started",
-            reason = "Login keystroke baseline is ready. Touch and motion baselines will update after live data arrives.",
+            reason = if (isProfileBased)
+                "Using enrolled behavioral profile. Calibrated modalities are active; ML is gated by profile quality."
+            else
+                "Login keystroke baseline is ready. Touch and motion baselines will update after live data arrives.",
             riskScore = 0f,
             riskLevel = RiskLevel.LOW,
             recommendation = SecurityRecommendation.CONTINUE
         )
     }
+
+    /**
+     * Loads baseline values from a stored BehavioralProfile (from enrollment).
+     * This provides much better accuracy than the provisional defaults.
+     */
+    private fun loadUserProfile(profile: BehavioralProfile) {
+        // Keystroke
+        baselineKeystrokeDwell = if (profile.pinDwellMean > 0f) profile.pinDwellMean else 0f
+        baselineKeystrokeFlight = if (profile.pinFlightMean > 0f) profile.pinFlightMean else 0f
+        baselineKeystrokeDwellStdDev = profile.pinDwellStd.coerceAtLeast(5f)
+        baselineKeystrokeFlightStdDev = profile.pinFlightStd.coerceAtLeast(5f)
+
+        // Touch
+        baselineTouchPressure = if (profile.pressureMean > 0f) profile.pressureMean else 0.5f
+        baselineTouchPressureStdDev = profile.pressureStd.coerceAtLeast(0.05f)
+        baselineTouchArea = if (profile.touchAreaMean > 0f) profile.touchAreaMean else 1f
+        baselineTouchAreaStdDev = profile.touchAreaStd.coerceAtLeast(0.05f)
+        baselineTouchDuration = if (profile.durationMean > 0f) profile.durationMean else 150f
+        baselineTouchDurationStdDev = profile.durationStd.coerceAtLeast(40f)
+        baselineHoldDuration = profile.holdDurationMean
+        baselineHoldDurationStdDev = profile.holdDurationStd.coerceAtLeast(60f)
+        baselineSwipeVelocity = if (profile.velocityMean > 0f) profile.velocityMean else 500f
+        baselineSwipeVelocityStdDev = profile.velocityStd.coerceAtLeast(100f)
+        baselineSwipeAcceleration = profile.accelerationMean
+        baselineSwipeAccelerationStdDev = profile.accelerationStd.coerceAtLeast(100f)
+        baselineTapRatio = profile.tapRatio
+        baselineSwipeRatio = profile.swipeRatio
+        baselineLongPressRatio = profile.longPressRatio
+
+        // Motion
+        baselineDevicePitch = if (profile.pitchMean != 0f) profile.pitchMean else 45f
+        baselineDeviceRoll = profile.rollMean
+        baselineDeviceState = try {
+            DeviceState.valueOf(profile.baselineDeviceState)
+        } catch (_: Exception) {
+            DeviceState.HELD_IN_HAND
+        }
+    }
+
+    private fun BehavioralProfile.isUsableForML(): Boolean =
+        sampleCount >= MIN_PROFILE_ML_SAMPLES &&
+            pinDwellMean > 0f &&
+            pressureMean > 0f &&
+            durationMean > 0f
 
     /**
      * Loads the ML model and prepares it for inference.
@@ -204,7 +299,19 @@ class BehaviorAnalyzer @Inject constructor(
     /**
      * Updates baseline with initial touch/motion data after login.
      */
-    suspend fun updateInitialBaseline(sessionId: String) {
+    suspend fun updateInitialBaseline(sessionId: String): Boolean {
+        if (isProfileBased) {
+            publishDebugState(
+                sessionState = "Monitoring",
+                decision = "Enrolled baseline preserved",
+                reason = "Using signup enrollment profile. Live protected-session data is not folded into the baseline.",
+                riskScore = _currentRiskScore.value,
+                riskLevel = _currentRiskLevel.value,
+                recommendation = SecurityRecommendation.CONTINUE
+            )
+            return false
+        }
+
         val (avgPressure, avgVelocity) = behavioralRepository.getAverageTouchMetrics(sessionId)
         val (avgPitch, avgRoll, commonState) = behavioralRepository.getAverageMotionMetrics(sessionId)
         
@@ -222,7 +329,191 @@ class BehaviorAnalyzer @Inject constructor(
             riskLevel = _currentRiskLevel.value,
             recommendation = SecurityRecommendation.CONTINUE
         )
+        return true
     }
+
+    /**
+     * Process a single touch event in real-time against the enrollment baseline.
+     * Provides immediate anomaly feedback before the periodic assessment runs.
+     *
+     * Scores pressure, touch area, duration, hold duration, velocity,
+     * acceleration, and gesture mix against the enrolled profile.
+     *
+     * @return SecurityRecommendation for immediate action.
+     */
+    fun processRealTimeTouch(touchData: TouchData): SecurityRecommendation {
+        if (!isProfileBased) {
+            // Without an enrolled profile, real-time touch scoring has no reliable
+            // baseline to compare against. Skip and let periodic analysis handle it.
+            return SecurityRecommendation.CONTINUE
+        }
+
+        realTimeTouchSamples++
+        if (touchData.pressure >= 0.95f) {
+            saturatedPressureSamples++
+        }
+        latestTouchPressure = touchData.pressure
+        latestSwipeVelocity = if (touchData.velocity > 0f) touchData.velocity else latestSwipeVelocity
+
+        val isTrustRamp = realTimeTouchSamples <= TOUCH_TRUST_RAMP_SAMPLES ||
+            System.currentTimeMillis() - sessionStartedAt < TOUCH_TRUST_RAMP_MS
+        val isClearlyExtremeTouch = touchData.holdDuration > 1200L ||
+            touchData.duration > 1800L ||
+            (touchData.velocity > 0f && baselineSwipeVelocity > 0f &&
+                touchData.velocity > (baselineSwipeVelocity * 3.2f).coerceAtLeast(2200f))
+
+        if (isTrustRamp && !isClearlyExtremeTouch) {
+            _currentRiskScore.value = (_currentRiskScore.value * 0.96f).coerceIn(0f, 1f)
+            _currentRiskLevel.value = mapScoreToRiskLevel(_currentRiskScore.value)
+            return SecurityRecommendation.CONTINUE
+        }
+
+        var weightedRisk = 0f
+        var totalWeight = 0f
+
+        fun addRisk(value: Float?, weight: Float) {
+            if (value == null) return
+            weightedRisk += value.coerceIn(0f, 1f) * weight
+            totalWeight += weight
+        }
+
+        val touchArea = if (touchData.touchArea > 0f) touchData.touchArea else touchData.touchSize
+        val isSwipe = touchData.touchType in listOf(
+            TouchType.SWIPE_UP,
+            TouchType.SWIPE_DOWN,
+            TouchType.SWIPE_LEFT,
+            TouchType.SWIPE_RIGHT,
+            TouchType.SCROLL
+        )
+
+        val pressureRisk = normalizedDeviation(
+            value = touchData.pressure,
+            baseline = baselineTouchPressure,
+            stdDev = baselineTouchPressureStdDev,
+            relativeTolerance = 0.55f,
+            minScale = 0.18f
+        )
+        val pressureWeight = if (saturatedPressureSamples >= 3) 0.35f else 0.85f
+        addRisk(pressureRisk, pressureWeight)
+
+        addRisk(
+            normalizedDeviation(touchArea, baselineTouchArea, baselineTouchAreaStdDev, 0.50f, 0.18f),
+            if (saturatedPressureSamples >= 3) 0.35f else 0.60f
+        )
+        addRisk(
+            normalizedDeviation(touchData.duration.toFloat(), baselineTouchDuration, baselineTouchDurationStdDev, 0.35f, 40f),
+            0.85f
+        )
+        addRisk(
+            normalizedDeviation(touchData.holdDuration.toFloat(), baselineHoldDuration, baselineHoldDurationStdDev, 0.40f, 60f),
+            0.90f
+        )
+        if (isSwipe) {
+            addRisk(
+                normalizedDeviation(touchData.velocity, baselineSwipeVelocity, baselineSwipeVelocityStdDev, 0.35f, 75f),
+                0.90f
+            )
+            addRisk(
+                normalizedDeviation(touchData.acceleration, baselineSwipeAcceleration, baselineSwipeAccelerationStdDev, 0.40f, 75f),
+                0.70f
+            )
+        }
+
+        val gestureRisk = when {
+            touchData.touchType == TouchType.LONG_PRESS && baselineLongPressRatio < 0.15f -> 0.65f
+            isSwipe && baselineSwipeRatio in 0f..0.15f -> 0.35f
+            touchData.touchType == TouchType.TAP && baselineTapRatio > 0f && baselineTapRatio < 0.30f -> 0.25f
+            else -> 0f
+        }
+        addRisk(gestureRisk, 0.55f)
+
+        if (totalWeight == 0f) return SecurityRecommendation.CONTINUE
+
+        val baseTouchRisk = weightedRisk / totalWeight
+        val isHighPressure = saturatedPressureSamples < 3 && (pressureRisk ?: 0f) >= 0.70f
+        val isLongHold = touchData.holdDuration >= (baselineHoldDuration + baselineHoldDurationStdDev * 3f).coerceAtLeast(400f)
+
+        consecutiveAbnormalTouches = if (baseTouchRisk >= 0.38f) {
+            (consecutiveAbnormalTouches + 1).coerceAtMost(8)
+        } else {
+            (consecutiveAbnormalTouches - 1).coerceAtLeast(0)
+        }
+        consecutiveHighPressureTouches = if (isHighPressure) {
+            (consecutiveHighPressureTouches + 1).coerceAtMost(6)
+        } else {
+            (consecutiveHighPressureTouches - 1).coerceAtLeast(0)
+        }
+        consecutiveLongPressTouches = if (isLongHold || touchData.touchType == TouchType.LONG_PRESS) {
+            (consecutiveLongPressTouches + 1).coerceAtMost(6)
+        } else {
+            (consecutiveLongPressTouches - 1).coerceAtLeast(0)
+        }
+
+        val persistenceBoost = (
+            consecutiveAbnormalTouches * 0.04f +
+                consecutiveHighPressureTouches * 0.05f +
+                consecutiveLongPressTouches * 0.05f
+            ).coerceAtMost(0.35f)
+        val instantaneousRisk = (baseTouchRisk + persistenceBoost).coerceIn(0f, 1f)
+        val smoothingFactor = when {
+            instantaneousRisk >= 0.70f -> 0.45f
+            instantaneousRisk >= 0.45f -> 0.30f
+            else -> 0.12f
+        }
+        val previousScore = _currentRiskScore.value
+        val smoothedRisk = if (instantaneousRisk < 0.15f) {
+            (previousScore * 0.92f + instantaneousRisk * 0.08f).coerceIn(0f, 1f)
+        } else {
+            (previousScore * (1f - smoothingFactor) + instantaneousRisk * smoothingFactor).coerceIn(0f, 1f)
+        }
+
+        _currentRiskScore.value = smoothedRisk
+
+        val riskLevel = mapScoreToRiskLevel(smoothedRisk)
+        _currentRiskLevel.value = riskLevel
+
+        return when (riskLevel) {
+            RiskLevel.CRITICAL -> SecurityRecommendation.FORCE_LOGOUT
+            RiskLevel.HIGH -> SecurityRecommendation.REQUEST_REAUTHENTICATION
+            RiskLevel.MEDIUM -> SecurityRecommendation.SHOW_WARNING
+            RiskLevel.LOW -> SecurityRecommendation.CONTINUE
+        }
+    }
+
+    private fun mapScoreToRiskLevel(score: Float): RiskLevel = when {
+        score >= CRITICAL_THRESHOLD -> RiskLevel.CRITICAL
+        score >= HIGH_THRESHOLD -> RiskLevel.HIGH
+        score >= MEDIUM_THRESHOLD -> RiskLevel.MEDIUM
+        else -> RiskLevel.LOW
+    }
+
+    private fun normalizedDeviation(
+        value: Float,
+        baseline: Float,
+        stdDev: Float,
+        relativeTolerance: Float,
+        minScale: Float
+    ): Float? {
+        if (value <= 0f || baseline <= 0f) return null
+        val scale = maxOf(stdDev * 3f, abs(baseline) * relativeTolerance, minScale)
+        return (abs(value - baseline) / scale).coerceIn(0f, 1f)
+    }
+
+    private fun List<Float>.meanOrZero(): Float =
+        if (isEmpty()) 0f else sum() / size
+
+    private fun List<Float>.stdOrZero(): Float {
+        if (size < 2) return 0f
+        val mean = meanOrZero()
+        return sqrt(map { value -> (value - mean) * (value - mean) }.meanOrZero())
+    }
+
+    private fun TouchData.isSwipeLike(): Boolean =
+        touchType == TouchType.SWIPE_UP ||
+            touchType == TouchType.SWIPE_DOWN ||
+            touchType == TouchType.SWIPE_LEFT ||
+            touchType == TouchType.SWIPE_RIGHT ||
+            touchType == TouchType.SCROLL
     
     /**
      * Performs a comprehensive risk assessment.
@@ -467,6 +758,117 @@ class BehaviorAnalyzer @Inject constructor(
         sessionId: String,
         anomalies: MutableList<BehavioralAnomaly>
     ): Float {
+        val recentTouchesForProfile = behavioralRepository.getRecentTouches(sessionId, ANALYSIS_WINDOW)
+        if (recentTouchesForProfile.size >= MIN_TOUCH_SAMPLES) {
+            val pressures = recentTouchesForProfile.map { it.pressure }.filter { it > 0f }
+            val areas = recentTouchesForProfile.map { if (it.touchArea > 0f) it.touchArea else it.touchSize }.filter { it > 0f }
+            val durations = recentTouchesForProfile.map { it.duration.toFloat() }.filter { it > 0f }
+            val holdDurations = recentTouchesForProfile.map { it.holdDuration.toFloat() }.filter { it > 0f }
+            val swipes = recentTouchesForProfile.filter { it.isSwipeLike() }
+            val velocities = swipes.map { it.velocity }.filter { it > 0f }
+            val accelerations = swipes.map { it.acceleration }.filter { it > 0f }
+            val total = recentTouchesForProfile.size.toFloat().coerceAtLeast(1f)
+            val tapRatio = recentTouchesForProfile.count { it.touchType == TouchType.TAP }.toFloat() / total
+            val swipeRatio = swipes.size.toFloat() / total
+            val longPressRatio = recentTouchesForProfile.count { it.touchType == TouchType.LONG_PRESS }.toFloat() / total
+            val interTouchIntervals = recentTouchesForProfile
+                .sortedBy { it.timestamp }
+                .zipWithNext()
+                .map { (first, second) -> (second.timestamp - first.timestamp).toFloat() }
+                .filter { it > 0f }
+
+            latestTouchPressure = pressures.meanOrZero()
+            latestSwipeVelocity = velocities.meanOrZero()
+
+            val featureRisks = mutableListOf<Pair<String, Float>>()
+
+            fun addFeatureRisk(name: String, risk: Float?) {
+                if (risk != null) {
+                    featureRisks.add(name to risk.coerceIn(0f, 1f))
+                }
+            }
+
+            val pressureSaturated = pressures.count { it >= 0.95f } >= (pressures.size / 2).coerceAtLeast(2)
+            if (!pressureSaturated) {
+                addFeatureRisk("pressure", normalizedDeviation(pressures.meanOrZero(), baselineTouchPressure, baselineTouchPressureStdDev, 0.55f, 0.18f))
+                addFeatureRisk("touch area", normalizedDeviation(areas.meanOrZero(), baselineTouchArea, baselineTouchAreaStdDev, 0.50f, 0.18f))
+            }
+            addFeatureRisk("duration", normalizedDeviation(durations.meanOrZero(), baselineTouchDuration, baselineTouchDurationStdDev, 0.35f, 40f))
+            addFeatureRisk("hold duration", normalizedDeviation(holdDurations.meanOrZero(), baselineHoldDuration, baselineHoldDurationStdDev, 0.40f, 60f))
+            addFeatureRisk("swipe velocity", normalizedDeviation(velocities.meanOrZero(), baselineSwipeVelocity, baselineSwipeVelocityStdDev, 0.35f, 75f))
+            addFeatureRisk("swipe acceleration", normalizedDeviation(accelerations.meanOrZero(), baselineSwipeAcceleration, baselineSwipeAccelerationStdDev, 0.40f, 75f))
+
+            if (baselineTapRatio > 0f) addFeatureRisk("tap ratio", abs(tapRatio - baselineTapRatio).coerceIn(0f, 1f))
+            if (baselineSwipeRatio > 0f) addFeatureRisk("swipe ratio", abs(swipeRatio - baselineSwipeRatio).coerceIn(0f, 1f))
+            if (baselineLongPressRatio > 0f || longPressRatio > 0.20f) {
+                addFeatureRisk("long press ratio", abs(longPressRatio - baselineLongPressRatio).coerceIn(0f, 1f))
+            }
+            addFeatureRisk(
+                "tap rhythm",
+                normalizedDeviation(
+                    interTouchIntervals.meanOrZero(),
+                    baselineTouchDuration + 250f,
+                    interTouchIntervals.stdOrZero().coerceAtLeast(120f),
+                    0.50f,
+                    120f
+                )
+            )
+
+            val pressureRisk = featureRisks.firstOrNull { it.first == "pressure" }?.second ?: 0f
+            val velocityRisk = featureRisks.firstOrNull { it.first == "swipe velocity" }?.second ?: 0f
+            val longPressRisk = featureRisks.firstOrNull { it.first == "long press ratio" }?.second ?: 0f
+
+            if (pressureRisk > LOW_THRESHOLD) {
+                anomalies.add(
+                    BehavioralAnomaly(
+                        type = AnomalyType.TOUCH_PRESSURE_CHANGE,
+                        severity = pressureRisk,
+                        description = "Touch pressure deviation: ${(pressureRisk * 100).toInt()}%"
+                    )
+                )
+            }
+
+            if (velocityRisk > LOW_THRESHOLD) {
+                anomalies.add(
+                    BehavioralAnomaly(
+                        type = AnomalyType.SWIPE_PATTERN_CHANGE,
+                        severity = velocityRisk,
+                        description = "Swipe velocity deviation: ${(velocityRisk * 100).toInt()}%"
+                    )
+                )
+            }
+
+            val topOtherRisk = featureRisks
+                .filterNot { it.first == "pressure" || it.first == "swipe velocity" }
+                .maxByOrNull { it.second }
+
+            if (topOtherRisk != null && topOtherRisk.second > LOW_THRESHOLD) {
+                anomalies.add(
+                    BehavioralAnomaly(
+                        type = AnomalyType.UNUSUAL_INTERACTION_PATTERN,
+                        severity = topOtherRisk.second,
+                        description = "Touch ${topOtherRisk.first} deviation: ${(topOtherRisk.second * 100).toInt()}%"
+                    )
+                )
+            }
+
+            if (longPressRisk > MEDIUM_THRESHOLD) {
+                anomalies.add(
+                    BehavioralAnomaly(
+                        type = AnomalyType.UNUSUAL_INTERACTION_PATTERN,
+                        severity = longPressRisk,
+                        description = "Repeated long-press behavior detected"
+                    )
+                )
+            }
+
+            if (featureRisks.isEmpty()) return 0f
+
+            val averageRisk = featureRisks.map { it.second }.average().toFloat()
+            val maxRisk = featureRisks.maxOf { it.second }
+            return ((averageRisk * 0.55f) + (maxRisk * 0.45f)).coerceIn(0f, 1f)
+        }
+
         // Use recent windowed metrics with minimum sample gate
         val recentMetrics = behavioralRepository.getRecentTouchMetrics(
             sessionId, ANALYSIS_WINDOW, MIN_TOUCH_SAMPLES
@@ -573,8 +975,9 @@ class BehaviorAnalyzer @Inject constructor(
         // Device state change detection
         if (currentState != null && currentState != baselineDeviceState) {
             val stateChangeSeverity = when {
-                baselineDeviceState == DeviceState.HELD_IN_HAND && currentState == DeviceState.ON_TABLE -> 0.1f
-                baselineDeviceState == DeviceState.ON_TABLE && currentState == DeviceState.HELD_IN_HAND -> 0.1f
+                baselineDeviceState == DeviceState.HELD_IN_HAND && currentState == DeviceState.ON_TABLE -> 0.35f
+                baselineDeviceState == DeviceState.HELD_IN_HAND && currentState == DeviceState.STATIONARY -> 0.30f
+                baselineDeviceState == DeviceState.ON_TABLE && currentState == DeviceState.HELD_IN_HAND -> 0.25f
                 currentState == DeviceState.WALKING && baselineDeviceState != DeviceState.WALKING -> 0.3f
                 else -> 0.15f
             }
@@ -769,6 +1172,25 @@ class BehaviorAnalyzer @Inject constructor(
         )
     }
 
+    fun markUserVerified() {
+        val verifiedScore = 0.10f
+        _currentRiskScore.value = verifiedScore
+        _currentRiskLevel.value = RiskLevel.LOW
+        consecutiveAbnormalTouches = 0
+        consecutiveHighPressureTouches = 0
+        consecutiveLongPressTouches = 0
+        publishDebugState(
+            sessionState = "Identity verified",
+            decision = SecurityRecommendation.CONTINUE.name,
+            reason = "User completed PIN reauthentication. Risk counters were reset and monitoring continues.",
+            riskScore = verifiedScore,
+            riskLevel = RiskLevel.LOW,
+            recommendation = SecurityRecommendation.CONTINUE,
+            zScoreRisk = verifiedScore,
+            timestamp = System.currentTimeMillis()
+        )
+    }
+
     private fun publishDebugState(
         sessionState: String,
         decision: String,
@@ -886,13 +1308,33 @@ class BehaviorAnalyzer @Inject constructor(
     fun reset() {
         currentSessionId = ""
         analysisCount = 0
+        isProfileBased = false
         baselineKeystrokeDwell = 0f
         baselineKeystrokeFlight = 0f
         baselineTouchPressure = 0.5f
+        baselineTouchPressureStdDev = 0.1f
+        baselineTouchArea = 0f
+        baselineTouchAreaStdDev = 0.1f
+        baselineTouchDuration = 150f
+        baselineTouchDurationStdDev = 60f
+        baselineHoldDuration = 0f
+        baselineHoldDurationStdDev = 80f
         baselineSwipeVelocity = 500f
+        baselineSwipeVelocityStdDev = 150f
+        baselineSwipeAcceleration = 0f
+        baselineSwipeAccelerationStdDev = 150f
+        baselineTapRatio = 0f
+        baselineSwipeRatio = 0f
+        baselineLongPressRatio = 0f
         baselineDevicePitch = 45f
         baselineDeviceRoll = 0f
         baselineDeviceState = DeviceState.UNKNOWN
+        consecutiveAbnormalTouches = 0
+        consecutiveHighPressureTouches = 0
+        consecutiveLongPressTouches = 0
+        sessionStartedAt = 0L
+        realTimeTouchSamples = 0
+        saturatedPressureSamples = 0
         latestKeystrokeDwell = 0f
         latestKeystrokeFlight = 0f
         latestTouchPressure = 0f
@@ -926,4 +1368,3 @@ class BehaviorAnalyzer @Inject constructor(
         _mlReadyState.value = isMLReady()
     }
 }
-

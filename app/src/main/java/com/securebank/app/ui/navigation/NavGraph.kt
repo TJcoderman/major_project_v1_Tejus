@@ -6,6 +6,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navigation
+import com.securebank.app.data.model.AlertSeverity
 import com.securebank.app.data.model.ExperimentSessionType
 import com.securebank.app.sensor.TouchDataCollector
 import com.securebank.app.ui.components.SecurityAlertDialog
@@ -13,6 +14,7 @@ import com.securebank.app.ui.screens.DashboardScreen
 import com.securebank.app.ui.screens.ExperimentHubScreen
 import com.securebank.app.ui.screens.ExperimentSessionScreen
 import com.securebank.app.ui.screens.LoginScreen
+import com.securebank.app.ui.screens.SignupScreen
 import com.securebank.app.ui.screens.TransferScreen
 import com.securebank.app.ui.viewmodel.AuthViewModel
 import com.securebank.app.ui.viewmodel.BankingViewModel
@@ -23,6 +25,7 @@ import com.securebank.app.ui.viewmodel.ExperimentViewModel
  */
 sealed class Screen(val route: String) {
     object Login : Screen("login")
+    object Signup : Screen("signup")
     object Dashboard : Screen("dashboard")
     object Transfer : Screen("transfer")
     object ExperimentHub : Screen("experiment_hub")
@@ -70,11 +73,22 @@ fun SecureBankNavGraph(
     
     // Security Alert Dialog — severity determines available actions
     if (showSecurityAlert) {
+        val currentUser = authState.currentUser
+        val verificationValue = currentUser?.pin?.takeIf { it.isNotBlank() }
+            ?: currentUser?.passwordHash
+        val verificationLabel = if (!currentUser?.pin.isNullOrBlank()) "PIN" else "password"
+
         SecurityAlertDialog(
             message = securityAlertMessage,
             severity = alertSeverity,
+            expectedVerificationValue = verificationValue,
+            verificationLabel = verificationLabel,
             onDismiss = {
-                bankingViewModel.dismissSecurityAlert()
+                if (alertSeverity == AlertSeverity.HIGH) {
+                    bankingViewModel.acknowledgeVerifiedIdentity()
+                } else {
+                    bankingViewModel.dismissSecurityAlert()
+                }
             },
             onLogout = {
                 bankingViewModel.dismissSecurityAlert()
@@ -136,6 +150,24 @@ fun SecureBankNavGraph(
                             popUpTo(Screen.Login.route) { inclusive = true }
                         }
                     }
+                },
+                onCreateAccount = {
+                    navController.navigate(Screen.Signup.route)
+                }
+            )
+        }
+        
+        // Signup Screen
+        composable(Screen.Signup.route) {
+            SignupScreen(
+                touchDataCollector = touchDataCollector,
+                onSignupComplete = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(Screen.Signup.route) { inclusive = true }
+                    }
+                },
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }
@@ -265,4 +297,3 @@ fun SecureBankNavGraph(
         }
     }
 }
-

@@ -18,6 +18,8 @@ data class User(
     val fullName: String,
     val accountNumber: String,
     val balance: Double = 50000.0,   // Mock balance
+    val pin: String = "",            // 6-digit PIN for behavioral enrollment
+    val enrollmentComplete: Boolean = false, // True after guided behavioral enrollment
     val createdAt: Long = System.currentTimeMillis()
 )
 

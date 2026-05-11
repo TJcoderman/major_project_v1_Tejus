@@ -26,9 +26,10 @@ import kotlinx.coroutines.launch
         KeystrokeData::class,
         TouchData::class,
         MotionData::class,
-        BehavioralSession::class
+        BehavioralSession::class,
+        BehavioralProfile::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(
@@ -43,6 +44,7 @@ abstract class SecureBankDatabase : RoomDatabase() {
     abstract fun touchDao(): TouchDao
     abstract fun motionDao(): MotionDao
     abstract fun behavioralSessionDao(): BehavioralSessionDao
+    abstract fun behavioralProfileDao(): BehavioralProfileDao
     
     companion object {
         private const val DATABASE_NAME = "securebank_db"
@@ -89,24 +91,34 @@ abstract class SecureBankDatabase : RoomDatabase() {
                     passwordHash = "demo123", // In real app, this would be hashed
                     fullName = "Demo User",
                     accountNumber = "1234567890",
-                    balance = 50000.0
+                    balance = 50000.0,
+                    pin = "382946",
+                    enrollmentComplete = true
                 ),
                 User(
                     username = "john",
                     passwordHash = "john123",
                     fullName = "John Doe",
                     accountNumber = "9876543210",
-                    balance = 75000.0
+                    balance = 75000.0,
+                    pin = "382946",
+                    enrollmentComplete = true
                 ),
                 User(
                     username = "jane",
                     passwordHash = "jane123",
                     fullName = "Jane Smith",
                     accountNumber = "5555555555",
-                    balance = 120000.0
+                    balance = 120000.0,
+                    pin = "382946",
+                    enrollmentComplete = true
                 )
             )
             database.userDao().insertAll(mockUsers)
+
+            DemoBehavioralProfiles.all().forEach { profile ->
+                database.behavioralProfileDao().insert(profile)
+            }
             
             // Seed mock transactions for demo user
             val mockTransactions = listOf(

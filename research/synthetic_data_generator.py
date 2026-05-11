@@ -119,6 +119,10 @@ def extract_touch_profile(participant_dir):
     durations = [float(r["duration_ms"]) for r in rows]
     velocities = [float(r["velocity"]) for r in rows]
     accelerations = [float(r["acceleration"]) for r in rows]
+    pressures = [float(r.get("pressure", 0.55)) for r in rows]
+    touch_sizes = [float(r.get("touch_size", 1.0)) for r in rows]
+    touch_areas = [float(r.get("touch_area", r.get("touch_size", 1.0))) for r in rows]
+    hold_durations = [float(r.get("hold_duration_ms", 0.0)) for r in rows]
 
     type_counts = {}
     for r in rows:
@@ -130,7 +134,13 @@ def extract_touch_profile(participant_dir):
         "duration_mean": np.mean(durations), "duration_std": np.std(durations),
         "velocity_mean": np.mean(velocities), "velocity_std": np.std(velocities),
         "acceleration_mean": np.mean(accelerations), "acceleration_std": np.std(accelerations),
+        "pressure_mean": np.mean(pressures), "pressure_std": max(np.std(pressures), 0.03),
+        "touch_size_mean": np.mean(touch_sizes), "touch_size_std": max(np.std(touch_sizes), 0.05),
+        "touch_area_mean": np.mean(touch_areas), "touch_area_std": max(np.std(touch_areas), 0.05),
+        "hold_duration_mean": np.mean(hold_durations), "hold_duration_std": np.std(hold_durations),
         "tap_ratio": type_counts.get("TAP", 0) / total,
+        "swipe_ratio": sum(type_counts.get(t, 0) for t in ["SWIPE_UP", "SWIPE_DOWN", "SWIPE_LEFT", "SWIPE_RIGHT"]) / total,
+        "long_press_ratio": type_counts.get("LONG_PRESS", 0) / total,
         "event_count": len(rows),
     }
 
@@ -199,8 +209,18 @@ def generate_unique_profile(real_pin_profiles, real_touch_profiles, real_motion_
         "velocity_std": touch_base["velocity_std"] * np.random.normal(1.0, 0.15),
         "acceleration_mean": touch_base["acceleration_mean"] * np.random.normal(1.0, 0.2),
         "acceleration_std": touch_base["acceleration_std"] * np.random.normal(1.0, 0.15),
+        "pressure_mean": np.clip(touch_base.get("pressure_mean", 0.55) * np.random.normal(1.0, 0.18), 0.20, 0.95),
+        "pressure_std": np.clip(touch_base.get("pressure_std", 0.08) * np.random.normal(1.0, 0.20), 0.03, 0.18),
+        "touch_size_mean": np.clip(touch_base.get("touch_size_mean", 1.0) * np.random.normal(1.0, 0.20), 0.40, 2.40),
+        "touch_size_std": np.clip(touch_base.get("touch_size_std", 0.15) * np.random.normal(1.0, 0.20), 0.04, 0.45),
+        "touch_area_mean": np.clip(touch_base.get("touch_area_mean", 1.0) * np.random.normal(1.0, 0.22), 0.40, 2.80),
+        "touch_area_std": np.clip(touch_base.get("touch_area_std", 0.18) * np.random.normal(1.0, 0.20), 0.04, 0.55),
+        "hold_duration_mean": touch_base.get("hold_duration_mean", 80) * np.random.normal(1.0, 0.25),
+        "hold_duration_std": max(30, touch_base.get("hold_duration_std", 120) * np.random.normal(1.0, 0.20)),
         "tap_ratio": np.clip(np.random.uniform(0.35, 0.70), 0, 1),
+        "long_press_ratio": np.clip(np.random.uniform(0.02, 0.12), 0, 1),
     }
+    touch_profile["swipe_ratio"] = np.clip(1.0 - touch_profile["tap_ratio"] - touch_profile["long_press_ratio"], 0, 1)
 
     # Motion profile
     motion_base = random.choice(real_motion_profiles)
@@ -344,16 +364,25 @@ def generate_touches(touch_profile, age_mod, num_events=None, jitter=1.0):
             acceleration = max(0, np.random.normal(200, 80))
 
         hold_duration = int(duration) if touch_type in ["TAP", "LONG_PRESS"] else 0
+        pressure = np.clip(np.random.normal(
+            touch_profile["pressure_mean"], touch_profile["pressure_std"] * jitter
+        ), 0.05, 1.0)
+        touch_size = np.clip(np.random.normal(
+            touch_profile["touch_size_mean"], touch_profile["touch_size_std"] * jitter
+        ), 0.1, 3.0)
+        touch_area = np.clip(np.random.normal(
+            touch_profile["touch_area_mean"], touch_profile["touch_area_std"] * jitter
+        ), 0.1, 3.5)
 
         rows.append({
             "timestamp": base_time + i * random.randint(400, 2000),
             "touch_type": touch_type,
             "start_x": round(start_x, 5), "start_y": round(start_y, 5),
             "end_x": round(end_x, 5), "end_y": round(end_y, 5),
-            "pressure": 1.0, "touch_size": 1.0,
+            "pressure": round(pressure, 5), "touch_size": round(touch_size, 5),
             "duration_ms": duration,
             "velocity": round(velocity, 4), "acceleration": round(acceleration, 4),
-            "hold_duration_ms": hold_duration, "touch_area": 1.0,
+            "hold_duration_ms": hold_duration, "touch_area": round(touch_area, 5),
         })
     return rows
 

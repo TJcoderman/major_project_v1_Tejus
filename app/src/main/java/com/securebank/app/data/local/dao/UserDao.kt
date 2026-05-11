@@ -25,6 +25,12 @@ interface UserDao {
     @Query("SELECT * FROM users WHERE username = :username AND passwordHash = :passwordHash")
     suspend fun authenticate(username: String, passwordHash: String): User?
     
+    @Query("SELECT COUNT(*) > 0 FROM users WHERE username = :username")
+    suspend fun usernameExists(username: String): Boolean
+
+    @Query("SELECT COUNT(*) > 0 FROM users WHERE accountNumber = :accountNumber")
+    suspend fun accountNumberExists(accountNumber: String): Boolean
+
     @Update
     suspend fun update(user: User)
     

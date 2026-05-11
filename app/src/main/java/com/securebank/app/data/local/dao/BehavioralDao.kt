@@ -133,6 +133,21 @@ interface MotionDao {
     """)
     suspend fun getMostCommonDeviceState(sessionId: String): String?
 
+    @Query("""
+        SELECT deviceState
+        FROM (
+            SELECT deviceState
+            FROM motion_data
+            WHERE sessionId = :sessionId
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        )
+        GROUP BY deviceState
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """)
+    suspend fun getRecentMostCommonDeviceState(sessionId: String, limit: Int): String?
+
     @Query("SELECT COUNT(*) FROM motion_data WHERE sessionId = :sessionId")
     suspend fun getRecentMotionCount(sessionId: String): Int
 
@@ -181,4 +196,3 @@ interface BehavioralSessionDao {
     @Query("DELETE FROM behavioral_sessions WHERE endTime IS NOT NULL AND endTime < :timestamp")
     suspend fun deleteOldSessions(timestamp: Long)
 }
-

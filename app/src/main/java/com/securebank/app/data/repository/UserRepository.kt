@@ -33,6 +33,22 @@ class UserRepository @Inject constructor(
     suspend fun getUserByUsername(username: String): User? {
         return userDao.getByUsername(username)
     }
+
+    suspend fun usernameExists(username: String): Boolean {
+        return userDao.usernameExists(username)
+    }
+
+    suspend fun accountNumberExists(accountNumber: String): Boolean {
+        return userDao.accountNumberExists(accountNumber)
+    }
+
+    // ========================
+    // USER CREATION
+    // ========================
+
+    suspend fun createUser(user: User) {
+        userDao.insert(user)
+    }
     
     // ========================
     // USER OPERATIONS

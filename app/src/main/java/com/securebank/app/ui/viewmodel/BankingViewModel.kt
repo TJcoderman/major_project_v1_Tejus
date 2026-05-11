@@ -82,7 +82,7 @@ class BankingViewModel @Inject constructor(
     private var currentSessionId: String = ""
     
     // Debug mode
-    private val _debugMode = MutableStateFlow(true)
+    private val _debugMode = MutableStateFlow(false)
     val debugMode: StateFlow<Boolean> = _debugMode.asStateFlow()
     
     // Real-time monitoring data (for Debug Panel)
@@ -138,12 +138,18 @@ class BankingViewModel @Inject constructor(
         // Start keystroke collection (non-baseline mode)
         keystrokeCollector.startCollection(sessionId, isBaseline = false)
         
-        // Collect touch events
+        // Collect touch events — with real-time touch scoring
         touchCollectionJob = viewModelScope.launch {
             touchDataCollector.touchEvents.collect { touchData ->
                 _liveTouchData.value = touchData
                 behavioralRepository.saveTouch(touchData)
                 incrementCounters(touches = 1, databaseWrites = 1)
+
+                // Real-time touch scoring against enrollment baseline
+                val recommendation = behaviorAnalyzer.processRealTimeTouch(touchData)
+                if (recommendation != SecurityRecommendation.CONTINUE) {
+                    handleRealTimeRecommendation(recommendation, "Touch")
+                }
             }
         }
         
@@ -283,8 +289,14 @@ class BankingViewModel @Inject constructor(
             delay(10000)
             
             // Update baseline with initial touch/motion data
-            behaviorAnalyzer.updateInitialBaseline(currentSessionId)
-            addDebugEvent("Touch and motion baseline updated")
+            val baselineUpdated = behaviorAnalyzer.updateInitialBaseline(currentSessionId)
+            addDebugEvent(
+                if (baselineUpdated) {
+                    "Touch and motion baseline updated"
+                } else {
+                    "Enrolled behavioral baseline preserved"
+                }
+            )
             
             // Periodic assessment every 15 seconds
             while (isCollecting) {
@@ -333,6 +345,39 @@ class BankingViewModel @Inject constructor(
             }
         }
     }
+
+    private fun handleRealTimeRecommendation(
+        recommendation: SecurityRecommendation,
+        source: String
+    ) {
+        when (recommendation) {
+            SecurityRecommendation.CONTINUE -> Unit
+            SecurityRecommendation.SHOW_WARNING -> {
+                _alertSeverity.value = AlertSeverity.MEDIUM
+                addDebugEvent("$source warning: unusual behavior")
+                if (_debugMode.value) {
+                    showToast("Warning: $source anomaly detected")
+                }
+            }
+            SecurityRecommendation.REQUEST_REAUTHENTICATION -> {
+                addDebugEvent("$source action required: reauthentication")
+                _alertSeverity.value = AlertSeverity.HIGH
+                _securityAlertMessage.value = "Unusual $source behavior detected. Please verify your identity."
+                _showSecurityAlert.value = true
+                vibrate()
+            }
+            SecurityRecommendation.FORCE_LOGOUT -> {
+                addDebugEvent("$source action required: force logout")
+                _alertSeverity.value = AlertSeverity.CRITICAL
+                _securityAlertMessage.value = "Critical $source anomaly detected. Session terminated."
+                _showSecurityAlert.value = true
+                vibrate()
+                stopBehavioralCollection()
+                behaviorAnalyzer.reset()
+                _forceLogoutEvent.value = true
+            }
+        }
+    }
     
     /**
      * Called by NavGraph after processing the force logout event.
@@ -349,6 +394,14 @@ class BankingViewModel @Inject constructor(
         if (_alertSeverity.value != AlertSeverity.CRITICAL) {
             _showSecurityAlert.value = false
         }
+    }
+
+    fun acknowledgeVerifiedIdentity() {
+        if (_alertSeverity.value == AlertSeverity.HIGH) {
+            behaviorAnalyzer.markUserVerified()
+            addDebugEvent("Identity verified by PIN")
+        }
+        _showSecurityAlert.value = false
     }
     
     /**
@@ -535,4 +588,3 @@ enum class TransferField {
     AMOUNT,
     REMARKS
 }
-

@@ -1,5 +1,6 @@
 package com.securebank.app.data.repository;
 
+import com.securebank.app.data.local.dao.BehavioralProfileDao;
 import com.securebank.app.data.local.dao.BehavioralSessionDao;
 import com.securebank.app.data.local.dao.KeystrokeDao;
 import com.securebank.app.data.local.dao.MotionDao;
@@ -36,28 +37,33 @@ public final class BehavioralRepository_Factory implements Factory<BehavioralRep
 
   private final Provider<BehavioralSessionDao> sessionDaoProvider;
 
+  private final Provider<BehavioralProfileDao> profileDaoProvider;
+
   public BehavioralRepository_Factory(Provider<KeystrokeDao> keystrokeDaoProvider,
       Provider<TouchDao> touchDaoProvider, Provider<MotionDao> motionDaoProvider,
-      Provider<BehavioralSessionDao> sessionDaoProvider) {
+      Provider<BehavioralSessionDao> sessionDaoProvider,
+      Provider<BehavioralProfileDao> profileDaoProvider) {
     this.keystrokeDaoProvider = keystrokeDaoProvider;
     this.touchDaoProvider = touchDaoProvider;
     this.motionDaoProvider = motionDaoProvider;
     this.sessionDaoProvider = sessionDaoProvider;
+    this.profileDaoProvider = profileDaoProvider;
   }
 
   @Override
   public BehavioralRepository get() {
-    return newInstance(keystrokeDaoProvider.get(), touchDaoProvider.get(), motionDaoProvider.get(), sessionDaoProvider.get());
+    return newInstance(keystrokeDaoProvider.get(), touchDaoProvider.get(), motionDaoProvider.get(), sessionDaoProvider.get(), profileDaoProvider.get());
   }
 
   public static BehavioralRepository_Factory create(Provider<KeystrokeDao> keystrokeDaoProvider,
       Provider<TouchDao> touchDaoProvider, Provider<MotionDao> motionDaoProvider,
-      Provider<BehavioralSessionDao> sessionDaoProvider) {
-    return new BehavioralRepository_Factory(keystrokeDaoProvider, touchDaoProvider, motionDaoProvider, sessionDaoProvider);
+      Provider<BehavioralSessionDao> sessionDaoProvider,
+      Provider<BehavioralProfileDao> profileDaoProvider) {
+    return new BehavioralRepository_Factory(keystrokeDaoProvider, touchDaoProvider, motionDaoProvider, sessionDaoProvider, profileDaoProvider);
   }
 
   public static BehavioralRepository newInstance(KeystrokeDao keystrokeDao, TouchDao touchDao,
-      MotionDao motionDao, BehavioralSessionDao sessionDao) {
-    return new BehavioralRepository(keystrokeDao, touchDao, motionDao, sessionDao);
+      MotionDao motionDao, BehavioralSessionDao sessionDao, BehavioralProfileDao profileDao) {
+    return new BehavioralRepository(keystrokeDao, touchDao, motionDao, sessionDao, profileDao);
   }
 }

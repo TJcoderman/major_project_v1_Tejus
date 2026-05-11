@@ -71,5 +71,11 @@ object AppModule {
     fun provideBehavioralSessionDao(database: SecureBankDatabase): BehavioralSessionDao {
         return database.behavioralSessionDao()
     }
+
+    @Provides
+    @Singleton
+    fun provideBehavioralProfileDao(database: SecureBankDatabase): BehavioralProfileDao {
+        return database.behavioralProfileDao()
+    }
 }
 

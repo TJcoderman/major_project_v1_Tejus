@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,6 +21,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -118,9 +121,16 @@ fun RiskIndicatorBadge(
 fun SecurityAlertDialog(
     message: String,
     severity: AlertSeverity = AlertSeverity.MEDIUM,
+    expectedVerificationValue: String? = null,
+    verificationLabel: String = "credential",
     onDismiss: () -> Unit,
     onLogout: () -> Unit
 ) {
+    var verificationInput by remember(severity, verificationLabel) { mutableStateOf("") }
+    var verificationError by remember(severity, verificationLabel) { mutableStateOf<String?>(null) }
+    val shouldVerify = severity == AlertSeverity.HIGH && !expectedVerificationValue.isNullOrBlank()
+    val isPinVerification = verificationLabel.equals("PIN", ignoreCase = true)
+
     Dialog(
         onDismissRequest = { /* Prevent dismiss by clicking outside */ },
         properties = DialogProperties(
@@ -193,6 +203,48 @@ fun SecurityAlertDialog(
                     color = CloudGray,
                     textAlign = TextAlign.Center
                 )
+
+                if (shouldVerify) {
+                    OutlinedTextField(
+                        value = verificationInput,
+                        onValueChange = {
+                            val accepted = if (isPinVerification) {
+                                it.length <= 6 && it.all { char -> char.isDigit() }
+                            } else {
+                                it.length <= 64
+                            }
+                            if (accepted) {
+                                verificationInput = it
+                                verificationError = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Enter $verificationLabel") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (isPinVerification) {
+                                KeyboardType.NumberPassword
+                            } else {
+                                KeyboardType.Password
+                            }
+                        ),
+                        isError = verificationError != null,
+                        supportingText = {
+                            verificationError?.let { Text(it, color = Coral) }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Emerald,
+                            unfocusedBorderColor = DimGray,
+                            focusedLabelColor = Emerald,
+                            unfocusedLabelColor = MutedGray,
+                            focusedTextColor = CloudWhite,
+                            unfocusedTextColor = CloudWhite,
+                            cursorColor = Emerald
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -229,7 +281,13 @@ fun SecurityAlertDialog(
                     // MEDIUM: "Continue Session" button
                     if (severity != AlertSeverity.CRITICAL) {
                         OutlinedButton(
-                            onClick = onDismiss,
+                            onClick = {
+                                if (shouldVerify && verificationInput != expectedVerificationValue) {
+                                    verificationError = "Incorrect $verificationLabel"
+                                } else {
+                                    onDismiss()
+                                }
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp),

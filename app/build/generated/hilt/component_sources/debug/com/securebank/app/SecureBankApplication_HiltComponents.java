@@ -4,6 +4,7 @@ import com.securebank.app.di.AppModule;
 import com.securebank.app.ui.viewmodel.AuthViewModel_HiltModules;
 import com.securebank.app.ui.viewmodel.BankingViewModel_HiltModules;
 import com.securebank.app.ui.viewmodel.ExperimentViewModel_HiltModules;
+import com.securebank.app.ui.viewmodel.SignupViewModel_HiltModules;
 import dagger.Binds;
 import dagger.Component;
 import dagger.Module;
@@ -161,7 +162,8 @@ public final class SecureBankApplication_HiltComponents {
           HiltWrapper_ActivityRetainedComponentManager_LifecycleModule.class,
           HiltWrapper_SavedStateHandleModule.class,
           ActivityCBuilderModule.class,
-          ViewModelCBuilderModule.class
+          ViewModelCBuilderModule.class,
+          SignupViewModel_HiltModules.KeyModule.class
       }
   )
   @ActivityRetainedScoped
@@ -200,7 +202,8 @@ public final class SecureBankApplication_HiltComponents {
           AuthViewModel_HiltModules.BindsModule.class,
           BankingViewModel_HiltModules.BindsModule.class,
           ExperimentViewModel_HiltModules.BindsModule.class,
-          HiltWrapper_HiltViewModelFactory_ViewModelModule.class
+          HiltWrapper_HiltViewModelFactory_ViewModelModule.class,
+          SignupViewModel_HiltModules.BindsModule.class
       }
   )
   @ViewModelScoped

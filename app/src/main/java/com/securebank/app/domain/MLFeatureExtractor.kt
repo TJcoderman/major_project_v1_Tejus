@@ -45,6 +45,64 @@ class MLFeatureExtractor @Inject constructor() {
     }
 
     /**
+     * Restore an enrollment baseline from the persisted signup profile.
+     * This lets ML become available after app restart without retaining raw
+     * enrollment samples long-term.
+     */
+    fun setEnrollmentBaseline(profile: BehavioralProfile) {
+        enrollmentFeatures = RawFeatures(
+            mutableMapOf(
+                "pin_dwell_mean" to profile.pinDwellMean,
+                "pin_dwell_std" to profile.pinDwellStd,
+                "pin_dwell_median" to profile.pinDwellMean,
+                "pin_dwell_q25" to (profile.pinDwellMean - profile.pinDwellStd * 0.67f).coerceAtLeast(0f),
+                "pin_dwell_q75" to (profile.pinDwellMean + profile.pinDwellStd * 0.67f),
+                "pin_flight_mean" to profile.pinFlightMean,
+                "pin_flight_std" to profile.pinFlightStd,
+                "pin_flight_median" to profile.pinFlightMean,
+                "pin_flight_iqr" to (profile.pinFlightStd * 1.35f),
+                "pin_touch_x_mean" to 0f,
+                "pin_touch_x_std" to 0f,
+                "pin_touch_y_mean" to 0f,
+                "pin_touch_y_std" to 0f,
+                "pin_touch_size_mean" to profile.touchAreaMean,
+                "pin_touch_size_std" to profile.touchAreaStd,
+                "pin_dwell_skew" to 0f,
+                "pin_dwell_kurtosis" to 0f,
+                "pin_dwell_iqr" to (profile.pinDwellStd * 1.35f),
+                "touch_pressure_mean" to profile.pressureMean,
+                "touch_pressure_std" to profile.pressureStd,
+                "touch_area_mean" to profile.touchAreaMean,
+                "touch_area_std" to profile.touchAreaStd,
+                "touch_hold_mean" to profile.holdDurationMean,
+                "touch_hold_std" to profile.holdDurationStd,
+                "touch_duration_mean" to profile.durationMean,
+                "touch_duration_std" to profile.durationStd,
+                "touch_velocity_mean" to profile.velocityMean,
+                "touch_velocity_std" to profile.velocityStd,
+                "touch_velocity_max" to (profile.velocityMean + profile.velocityStd * 2f),
+                "touch_accel_mean" to profile.accelerationMean,
+                "touch_accel_std" to profile.accelerationStd,
+                "touch_tap_ratio" to profile.tapRatio,
+                "touch_swipe_ratio" to profile.swipeRatio,
+                "touch_long_press_ratio" to profile.longPressRatio,
+                "touch_count" to profile.sampleCount.toFloat(),
+                "motion_accel_mag_mean" to profile.accelMagnitudeMean,
+                "motion_accel_mag_std" to profile.accelMagnitudeStd,
+                "motion_gyro_mag_mean" to profile.gyroMagnitudeMean,
+                "motion_gyro_mag_std" to profile.gyroMagnitudeStd,
+                "motion_accel_x_mean" to 0f,
+                "motion_accel_y_mean" to 0f,
+                "motion_accel_z_mean" to profile.accelMagnitudeMean
+            )
+        )
+
+        for (pos in 0 until 6) {
+            enrollmentFeatures?.features?.put("pin_rhythm_d$pos", profile.pinDwellMean)
+        }
+    }
+
+    /**
      * Compute the full 124-dimension deviation feature vector
      * for a current session vs the enrollment baseline.
      *
@@ -126,8 +184,25 @@ class MLFeatureExtractor @Inject constructor() {
             val durations = touches.map { it.duration.toFloat() }
             val velocities = touches.map { it.velocity }
             val accels = touches.map { it.acceleration }
+            val pressures = touches.map { it.pressure }
+            val areas = touches.map { if (it.touchArea > 0f) it.touchArea else it.touchSize }
+            val holds = touches.map { it.holdDuration.toFloat() }
             val taps = touches.count { it.touchType == TouchType.TAP }
+            val swipes = touches.count {
+                it.touchType == TouchType.SWIPE_UP ||
+                    it.touchType == TouchType.SWIPE_DOWN ||
+                    it.touchType == TouchType.SWIPE_LEFT ||
+                    it.touchType == TouchType.SWIPE_RIGHT ||
+                    it.touchType == TouchType.SCROLL
+            }
+            val longPresses = touches.count { it.touchType == TouchType.LONG_PRESS }
 
+            f.put("touch_pressure_mean", pressures.mean())
+            f.put("touch_pressure_std", pressures.std())
+            f.put("touch_area_mean", areas.mean())
+            f.put("touch_area_std", areas.std())
+            f.put("touch_hold_mean", holds.mean())
+            f.put("touch_hold_std", holds.std())
             f.put("touch_duration_mean", durations.mean())
             f.put("touch_duration_std", durations.std())
             f.put("touch_velocity_mean", velocities.mean())
@@ -136,6 +211,8 @@ class MLFeatureExtractor @Inject constructor() {
             f.put("touch_accel_mean", accels.mean())
             f.put("touch_accel_std", accels.std())
             f.put("touch_tap_ratio", taps.toFloat() / touches.size)
+            f.put("touch_swipe_ratio", swipes.toFloat() / touches.size)
+            f.put("touch_long_press_ratio", longPresses.toFloat() / touches.size)
             f.put("touch_count", touches.size.toFloat())
         }
 

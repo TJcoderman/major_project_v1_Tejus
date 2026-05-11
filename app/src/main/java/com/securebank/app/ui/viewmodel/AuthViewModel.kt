@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securebank.app.data.model.AuthState
 import com.securebank.app.data.model.BehavioralSession
+import com.securebank.app.data.model.DemoBehavioralProfiles
 import com.securebank.app.data.model.KeystrokeData
 import com.securebank.app.data.model.User
 import com.securebank.app.data.repository.BehavioralRepository
@@ -127,15 +128,23 @@ class AuthViewModel @Inject constructor(
                 behavioralRepository.createSession(session)
                 
                 // Initialize behavior analyzer with baseline
-                behaviorAnalyzer.initializeBaseline(sessionId)
+                // Load enrolled behavioral profile if available
+                val storedProfile = behavioralRepository.getProfile(user.username)
+                val profile = storedProfile ?: DemoBehavioralProfiles.forUsername(user.username)?.also {
+                    behavioralRepository.saveProfile(it)
+                    Log.d("AuthViewModel", "Seeded demo behavioral profile attached for ${user.username}")
+                }
+                behaviorAnalyzer.initializeBaseline(sessionId, profile)
 
-                // ML enrollment: The banking demo does not use CustomPinPad for
-                // login, so we cannot collect real PIN keystroke features.
-                // ML enrollment will remain not-ready and the system will fall
-                // back to statistical Z-score detection only.
-                // Real ML enrollment happens through the experiment module's
-                // CustomPinPad flow.
-                Log.d("AuthViewModel", "ML enrollment skipped: banking demo uses password login, not PIN. Statistical detection active.")
+                if (profile != null) {
+                    Log.d("AuthViewModel", "Enrolled profile loaded for ${user.username} — profile-based baseline active")
+                } else {
+                    // ML enrollment: The banking demo does not use CustomPinPad for
+                    // login, so we cannot collect real PIN keystroke features.
+                    // ML enrollment will remain not-ready and the system will fall
+                    // back to statistical Z-score detection only.
+                    Log.d("AuthViewModel", "No enrolled profile for ${user.username} — provisional baseline active")
+                }
                 
                 _authState.value = AuthState(
                     isAuthenticated = true,
@@ -211,4 +220,3 @@ class AuthViewModel @Inject constructor(
      */
     fun getCurrentSessionId(): String = sessionId
 }
-

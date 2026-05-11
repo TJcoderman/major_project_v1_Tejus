@@ -18,8 +18,24 @@ class BehavioralRepository @Inject constructor(
     private val keystrokeDao: KeystrokeDao,
     private val touchDao: TouchDao,
     private val motionDao: MotionDao,
-    private val sessionDao: BehavioralSessionDao
+    private val sessionDao: BehavioralSessionDao,
+    private val profileDao: BehavioralProfileDao
 ) {
+    // ========================
+    // BEHAVIORAL PROFILE OPERATIONS
+    // ========================
+
+    suspend fun saveProfile(profile: BehavioralProfile) {
+        profileDao.insert(profile)
+    }
+
+    suspend fun getProfile(username: String): BehavioralProfile? {
+        return profileDao.getByUsername(username)
+    }
+
+    suspend fun upsertProfile(profile: BehavioralProfile) {
+        profileDao.insert(profile) // REPLACE strategy handles upsert
+    }
     // ========================
     // KEYSTROKE OPERATIONS
     // ========================
@@ -183,7 +199,7 @@ class BehavioralRepository @Inject constructor(
         if (count < minSamples) return null
         val avgPitch = motionDao.getRecentAvgPitch(sessionId, windowSize) ?: return null
         val avgRoll = motionDao.getRecentAvgRoll(sessionId, windowSize) ?: return null
-        val commonStateString = motionDao.getMostCommonDeviceState(sessionId)
+        val commonStateString = motionDao.getRecentMostCommonDeviceState(sessionId, windowSize)
         val commonState = commonStateString?.let {
             try { DeviceState.valueOf(it) } catch (e: Exception) { null }
         }
@@ -208,4 +224,3 @@ class BehavioralRepository @Inject constructor(
         sessionDao.deleteOldSessions(olderThanTimestamp)
     }
 }
-
