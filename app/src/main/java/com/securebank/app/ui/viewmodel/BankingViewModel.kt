@@ -461,7 +461,13 @@ class BankingViewModel @Inject constructor(
             result.fold(
                 onSuccess = { _ ->
                     _userBalance.value = _userBalance.value - amount
-                    _transferState.value = TransferState(isSuccess = true)
+                    _transferState.value = TransferState(
+                        isSuccess = true,
+                        successRecipientAccount = state.recipientAccount,
+                        successAmount = amount,
+                        successRemarks = state.remarks,
+                        successReferenceId = "SB${System.currentTimeMillis()}"
+                    )
                     showToast("Transfer successful!")
                 },
                 onFailure = { error ->
@@ -580,7 +586,11 @@ data class TransferState(
     val remarks: String = "",
     val isProcessing: Boolean = false,
     val isSuccess: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val successRecipientAccount: String = "",
+    val successAmount: Double = 0.0,
+    val successRemarks: String = "",
+    val successReferenceId: String = ""
 )
 
 enum class TransferField {

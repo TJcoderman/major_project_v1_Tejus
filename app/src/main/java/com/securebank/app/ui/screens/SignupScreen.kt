@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,12 +61,53 @@ fun SignupScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val signupSuccess by viewModel.signupSuccess.collectAsState()
     val stepProgress by viewModel.stepProgress.collectAsState()
+    var showCancelEnrollmentDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(signupSuccess) {
         if (signupSuccess) {
             kotlinx.coroutines.delay(1500)
             onSignupComplete()
         }
+    }
+
+    val handleBack: () -> Unit = {
+        when (currentStep) {
+            EnrollmentStep.FORM -> onBack()
+            EnrollmentStep.SAVING,
+            EnrollmentStep.COMPLETE -> Unit
+            else -> {
+                if (!viewModel.previousStep()) {
+                    onBack()
+                }
+            }
+        }
+    }
+
+    BackHandler(enabled = currentStep != EnrollmentStep.SAVING && currentStep != EnrollmentStep.COMPLETE) {
+        handleBack()
+    }
+
+    if (showCancelEnrollmentDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelEnrollmentDialog = false },
+            title = { Text("Cancel enrollment?") },
+            text = { Text("Your account details will stay on this screen, but the behavioral samples collected so far will be discarded.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCancelEnrollmentDialog = false
+                        viewModel.cancelEnrollment()
+                    }
+                ) {
+                    Text("Cancel Enrollment")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelEnrollmentDialog = false }) {
+                    Text("Keep Going")
+                }
+            }
+        )
     }
 
     Box(
@@ -88,7 +130,10 @@ fun SignupScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(
+                    onClick = handleBack,
+                    enabled = currentStep != EnrollmentStep.SAVING && currentStep != EnrollmentStep.COMPLETE
+                ) {
                     Icon(Icons.Default.ArrowBack, "Back", tint = CloudWhite)
                 }
                 Text(
@@ -99,8 +144,17 @@ fun SignupScreen(
                     },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = CloudWhite
+                    color = CloudWhite,
+                    modifier = Modifier.weight(1f)
                 )
+                if (currentStep != EnrollmentStep.FORM &&
+                    currentStep != EnrollmentStep.SAVING &&
+                    currentStep != EnrollmentStep.COMPLETE
+                ) {
+                    TextButton(onClick = { showCancelEnrollmentDialog = true }) {
+                        Text("Cancel", color = Coral, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -441,6 +495,7 @@ private fun TapTarget(
     onTap: (Offset) -> Unit,
     touchDataCollector: TouchDataCollector
 ) {
+    val scope = rememberCoroutineScope()
     val scale by animateFloatAsState(
         targetValue = if (isTapped) 0.85f else 1f,
         animationSpec = spring(dampingRatio = 0.4f),
@@ -460,8 +515,9 @@ private fun TapTarget(
             .border(2.dp, if (isTapped) Emerald else ObsidianBorder, CircleShape)
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
-                    kotlinx.coroutines.runBlocking {
-                        touchDataCollector.onTouchStart(offset, 0.5f, 1f)
+                    onTap(offset)
+                    touchDataCollector.onTouchStart(offset, 0.5f, 1f)
+                    scope.launch {
                         touchDataCollector.onTouchEnd(offset, 0.5f, 1f)
                     }
                 }

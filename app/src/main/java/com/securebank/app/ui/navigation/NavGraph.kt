@@ -65,6 +65,13 @@ fun SecureBankNavGraph(
     val securityAlertMessage by bankingViewModel.securityAlertMessage.collectAsState()
     val alertSeverity by bankingViewModel.alertSeverity.collectAsState()
     val forceLogoutEvent by bankingViewModel.forceLogoutEvent.collectAsState()
+    var logoutInProgress by remember { mutableStateOf(false) }
+
+    LaunchedEffect(authState.isAuthenticated) {
+        if (!authState.isAuthenticated) {
+            logoutInProgress = false
+        }
+    }
     
     // Real-time monitoring
     val liveMotionData by bankingViewModel.liveMotionData.collectAsState()
@@ -72,7 +79,7 @@ fun SecureBankNavGraph(
     val liveKeystrokeData by bankingViewModel.liveKeystrokeData.collectAsState()
     
     // Security Alert Dialog — severity determines available actions
-    if (showSecurityAlert) {
+    if (showSecurityAlert && !forceLogoutEvent && !logoutInProgress) {
         val currentUser = authState.currentUser
         val verificationValue = currentUser?.pin?.takeIf { it.isNotBlank() }
             ?: currentUser?.passwordHash
@@ -91,11 +98,14 @@ fun SecureBankNavGraph(
                 }
             },
             onLogout = {
-                bankingViewModel.dismissSecurityAlert()
-                bankingViewModel.stopBehavioralCollection()
-                authViewModel.logout()
-                navController.navigate(Screen.Login.route) {
-                    popUpTo(0) { inclusive = true }
+                if (!logoutInProgress) {
+                    logoutInProgress = true
+                    bankingViewModel.dismissSecurityAlert()
+                    bankingViewModel.stopBehavioralCollection()
+                    authViewModel.logout()
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
                 }
             }
         )
@@ -104,6 +114,11 @@ fun SecureBankNavGraph(
     // Handle force-logout events from the ViewModel (item 1 enforcement)
     LaunchedEffect(forceLogoutEvent) {
         if (forceLogoutEvent) {
+            if (logoutInProgress) {
+                bankingViewModel.acknowledgeForceLogout()
+                return@LaunchedEffect
+            }
+            logoutInProgress = true
             bankingViewModel.acknowledgeForceLogout()
             authViewModel.logout()
             navController.navigate(Screen.Login.route) {

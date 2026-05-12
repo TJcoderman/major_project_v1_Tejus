@@ -105,6 +105,7 @@ class SignupViewModel @Inject constructor(
 
     private val enrollmentMotion = mutableListOf<MotionData>()
     private var motionCollectionJob: Job? = null
+    private var holdCountdownJob: Job? = null
     private var enrollmentSessionId = "enrollment_${System.currentTimeMillis()}"
 
     // ── Step progress ──
@@ -122,6 +123,62 @@ class SignupViewModel @Inject constructor(
     }
     fun onAccountNumberChanged(value: String) { _accountNumber.value = value }
     fun clearError() { _errorMessage.value = null }
+
+    fun previousStep(): Boolean {
+        return when (_currentStep.value) {
+            EnrollmentStep.FORM -> false
+            EnrollmentStep.PIN_ENTRY -> {
+                cancelActiveCollectors()
+                clearEnrollmentProgress()
+                _currentStep.value = EnrollmentStep.FORM
+                _stepProgress.value = ""
+                true
+            }
+            EnrollmentStep.TAP_TARGETS -> {
+                touchDataCollector.stopCollection()
+                enrollmentTouches.clear()
+                _tapCount.value = 0
+                _currentPinInput.value = ""
+                _currentStep.value = EnrollmentStep.PIN_ENTRY
+                _stepProgress.value = "Enter your PIN ${MIN_PIN_ENTRIES} times"
+                true
+            }
+            EnrollmentStep.SWIPE_TEST -> {
+                enrollmentTouches.clear()
+                _tapCount.value = 0
+                _swipeCount.value = 0
+                touchDataCollector.startCollection(enrollmentSessionId)
+                _currentStep.value = EnrollmentStep.TAP_TARGETS
+                _stepProgress.value = "Tap the targets below ($MIN_TAP_SAMPLES needed)"
+                true
+            }
+            EnrollmentStep.HOLD_PHONE -> {
+                holdCountdownJob?.cancel()
+                motionCollectionJob?.cancel()
+                sensorDataCollector.stopCollection()
+                enrollmentMotion.clear()
+                _holdSecondsRemaining.value = HOLD_DURATION_SECONDS
+                _holdComplete.value = false
+                _currentStep.value = EnrollmentStep.SWIPE_TEST
+                _stepProgress.value = "Swipe in different directions ($MIN_SWIPE_SAMPLES needed)"
+                touchDataCollector.startCollection(enrollmentSessionId)
+                true
+            }
+            EnrollmentStep.SAVING,
+            EnrollmentStep.COMPLETE -> true
+        }
+    }
+
+    fun cancelEnrollment() {
+        cancelActiveCollectors()
+        clearEnrollmentProgress()
+        _currentStep.value = EnrollmentStep.FORM
+        _errorMessage.value = null
+        _isLoading.value = false
+        _signupSuccess.value = false
+        _stepProgress.value = ""
+        enrollmentSessionId = "enrollment_${System.currentTimeMillis()}"
+    }
 
     /**
      * Validates form and moves to enrollment steps.
@@ -270,7 +327,8 @@ class SignupViewModel @Inject constructor(
         }
 
         // Countdown timer
-        viewModelScope.launch {
+        holdCountdownJob?.cancel()
+        holdCountdownJob = viewModelScope.launch {
             for (i in HOLD_DURATION_SECONDS downTo 1) {
                 _holdSecondsRemaining.value = i
                 delay(1000)
@@ -429,8 +487,31 @@ class SignupViewModel @Inject constructor(
         return sqrt(variance)
     }
 
+    private fun cancelActiveCollectors() {
+        holdCountdownJob?.cancel()
+        motionCollectionJob?.cancel()
+        holdCountdownJob = null
+        motionCollectionJob = null
+        touchDataCollector.stopCollection()
+        sensorDataCollector.stopCollection()
+    }
+
+    private fun clearEnrollmentProgress() {
+        _currentPinInput.value = ""
+        _pinAttemptNumber.value = 1
+        _pinEntriesCompleted.value = 0
+        enrollmentPinKeystrokes.clear()
+        _tapCount.value = 0
+        enrollmentTouches.clear()
+        _swipeCount.value = 0
+        _holdSecondsRemaining.value = HOLD_DURATION_SECONDS
+        _holdComplete.value = false
+        enrollmentMotion.clear()
+    }
+
     override fun onCleared() {
         super.onCleared()
+        holdCountdownJob?.cancel()
         motionCollectionJob?.cancel()
         touchDataCollector.stopCollection()
         sensorDataCollector.stopCollection()

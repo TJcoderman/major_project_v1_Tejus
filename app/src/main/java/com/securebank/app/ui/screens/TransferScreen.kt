@@ -59,14 +59,9 @@ fun TransferScreen(
     val currencyFormat = remember { NumberFormat.getCurrencyInstance(Locale("en", "IN")) }
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
-    
-    // Navigate back on success after showing message
-    LaunchedEffect(transferState.isSuccess) {
-        if (transferState.isSuccess) {
-            kotlinx.coroutines.delay(2000)
-            onReset()
-            onBack()
-        }
+    val finishTransfer: () -> Unit = {
+        onReset()
+        onBack()
     }
     
     TouchCaptureWrapper(
@@ -85,7 +80,9 @@ fun TransferScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = {
+                            if (transferState.isSuccess) finishTransfer() else onBack()
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Back",
@@ -124,7 +121,11 @@ fun TransferScreen(
                         enter = fadeIn() + scaleIn(),
                         exit = fadeOut() + scaleOut()
                     ) {
-                        SuccessCard()
+                        SuccessCard(
+                            transferState = transferState,
+                            currencyFormat = currencyFormat,
+                            onDone = finishTransfer
+                        )
                     }
                     
                     // Transfer Form (hidden on success)
@@ -396,7 +397,11 @@ private fun SecurityNote() {
 }
 
 @Composable
-private fun SuccessCard() {
+private fun SuccessCard(
+    transferState: TransferState,
+    currencyFormat: NumberFormat,
+    onDone: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -450,8 +455,55 @@ private fun SuccessCard() {
                     color = Color.White.copy(alpha = 0.8f),
                     textAlign = TextAlign.Center
                 )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ReceiptRow("Amount", currencyFormat.format(transferState.successAmount))
+                    ReceiptRow("Recipient", transferState.successRecipientAccount)
+                    ReceiptRow(
+                        "Remarks",
+                        transferState.successRemarks.ifBlank { "Fund Transfer" }
+                    )
+                    ReceiptRow("Reference", transferState.successReferenceId)
+                }
+
+                Button(
+                    onClick = onDone,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Done", color = EmeraldDark, fontWeight = FontWeight.Bold)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun ReceiptRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp)
+        Text(
+            value,
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
