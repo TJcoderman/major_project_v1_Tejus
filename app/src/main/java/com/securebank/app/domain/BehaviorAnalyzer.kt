@@ -50,12 +50,76 @@ class BehaviorAnalyzer @Inject constructor(
         const val MIN_PROFILE_ML_SAMPLES = 18
         const val TOUCH_TRUST_RAMP_SAMPLES = 8
         const val TOUCH_TRUST_RAMP_MS = 6000L
+        const val MOTION_CRITICAL_ORIENTATION_DEGREES = 65f
+        const val MOTION_CRITICAL_DELTA_DEGREES = 50f
+        const val MOTION_CRITICAL_GYRO_RAD_PER_SEC = 3.5f
+        const val MOTION_HIGH_ORIENTATION_DEGREES = 35f
+        const val MOTION_HIGH_DELTA_DEGREES = 30f
+        const val MOTION_HIGH_GYRO_RAD_PER_SEC = 2.0f
 
         // ML model blending weight (0.0 = Z-score only, 1.0 = ML only)
         // 0.6 gives ML majority since it was trained on richer feature set
         const val ML_WEIGHT = 0.6f
 
         private const val TAG = "BehaviorAnalyzer"
+
+        internal data class RealTimeMotionEvaluation(
+            val riskScore: Float,
+            val isHighSpike: Boolean,
+            val isCriticalSpike: Boolean
+        )
+
+        internal fun evaluateRealTimeMotion(
+            motionData: MotionData,
+            previousMotionData: MotionData?,
+            baselinePitch: Float,
+            baselineRoll: Float,
+            baselineGyroMagnitudeMean: Float,
+            baselineGyroMagnitudeStdDev: Float
+        ): RealTimeMotionEvaluation {
+            val pitchDeviation = abs(motionData.pitch - baselinePitch)
+            val rollDeviation = abs(motionData.roll - baselineRoll)
+            val orientationDeviation = maxOf(pitchDeviation, rollDeviation)
+            val sampleDelta = previousMotionData?.let {
+                maxOf(
+                    abs(motionData.pitch - it.pitch),
+                    abs(motionData.roll - it.roll)
+                )
+            } ?: 0f
+            val gyroMagnitude = sqrt(
+                motionData.gyroX * motionData.gyroX +
+                    motionData.gyroY * motionData.gyroY +
+                    motionData.gyroZ * motionData.gyroZ
+            )
+
+            val highGyroLimit = maxOf(
+                MOTION_HIGH_GYRO_RAD_PER_SEC,
+                baselineGyroMagnitudeMean + baselineGyroMagnitudeStdDev * 6f
+            )
+            val criticalGyroLimit = maxOf(
+                MOTION_CRITICAL_GYRO_RAD_PER_SEC,
+                baselineGyroMagnitudeMean + baselineGyroMagnitudeStdDev * 12f
+            )
+
+            val isCriticalSpike = orientationDeviation >= MOTION_CRITICAL_ORIENTATION_DEGREES ||
+                sampleDelta >= MOTION_CRITICAL_DELTA_DEGREES ||
+                gyroMagnitude >= criticalGyroLimit
+            val isHighSpike = isCriticalSpike ||
+                orientationDeviation >= MOTION_HIGH_ORIENTATION_DEGREES ||
+                sampleDelta >= MOTION_HIGH_DELTA_DEGREES ||
+                gyroMagnitude >= highGyroLimit
+
+            val orientationRisk = orientationDeviation / MOTION_CRITICAL_ORIENTATION_DEGREES
+            val deltaRisk = sampleDelta / MOTION_CRITICAL_DELTA_DEGREES
+            val gyroRisk = gyroMagnitude / criticalGyroLimit
+            val riskScore = maxOf(orientationRisk, deltaRisk, gyroRisk).coerceIn(0f, 1f)
+
+            return RealTimeMotionEvaluation(
+                riskScore = riskScore,
+                isHighSpike = isHighSpike,
+                isCriticalSpike = isCriticalSpike
+            )
+        }
     }
     
     // Current risk state
@@ -96,6 +160,8 @@ class BehaviorAnalyzer @Inject constructor(
     private var baselineLongPressRatio: Float = 0f
     private var baselineDevicePitch: Float = 0f
     private var baselineDeviceRoll: Float = 0f
+    private var baselineGyroMagnitudeMean: Float = 0.15f
+    private var baselineGyroMagnitudeStdDev: Float = 0.08f
     private var baselineDeviceState: DeviceState = DeviceState.UNKNOWN
     private var latestKeystrokeDwell: Float = 0f
     private var latestKeystrokeFlight: Float = 0f
@@ -115,6 +181,7 @@ class BehaviorAnalyzer @Inject constructor(
     private var sessionStartedAt: Long = 0L
     private var realTimeTouchSamples = 0
     private var saturatedPressureSamples = 0
+    private var previousMotionData: MotionData? = null
 
     // ML model state
     private var mlModelLoaded = false
@@ -138,6 +205,7 @@ class BehaviorAnalyzer @Inject constructor(
         consecutiveAbnormalTouches = 0
         consecutiveHighPressureTouches = 0
         consecutiveLongPressTouches = 0
+        previousMotionData = null
 
         if (profile != null) {
             // ── Profile-based initialization (from enrollment) ──
@@ -163,6 +231,8 @@ class BehaviorAnalyzer @Inject constructor(
             baselineSwipeVelocity = 500f
             baselineDevicePitch = 45f
             baselineDeviceRoll = 0f
+            baselineGyroMagnitudeMean = 0.15f
+            baselineGyroMagnitudeStdDev = 0.08f
             baselineDeviceState = DeviceState.HELD_IN_HAND
         }
 
@@ -229,6 +299,8 @@ class BehaviorAnalyzer @Inject constructor(
         // Motion
         baselineDevicePitch = if (profile.pitchMean != 0f) profile.pitchMean else 45f
         baselineDeviceRoll = profile.rollMean
+        baselineGyroMagnitudeMean = profile.gyroMagnitudeMean.coerceAtLeast(0.05f)
+        baselineGyroMagnitudeStdDev = profile.gyroMagnitudeStd.coerceAtLeast(0.05f)
         baselineDeviceState = try {
             DeviceState.valueOf(profile.baselineDeviceState)
         } catch (_: Exception) {
@@ -1005,26 +1077,29 @@ class BehaviorAnalyzer @Inject constructor(
      * Processes real-time motion data to update risk score immediately.
      */
     fun processRealTimeMotion(motionData: MotionData): SecurityRecommendation {
-        // Calculate immediate deviation (Z-Score based)
-        var maxZScore = 0f
-        
-        if (baselineDevicePitch != 0f) {
-             val zScore = abs(motionData.pitch - baselineDevicePitch) / 15f
-             if (zScore > maxZScore) maxZScore = zScore
+        val motionEvaluation = evaluateRealTimeMotion(
+            motionData = motionData,
+            previousMotionData = previousMotionData,
+            baselinePitch = baselineDevicePitch,
+            baselineRoll = baselineDeviceRoll,
+            baselineGyroMagnitudeMean = baselineGyroMagnitudeMean,
+            baselineGyroMagnitudeStdDev = baselineGyroMagnitudeStdDev
+        )
+        previousMotionData = motionData
+        latestDevicePitch = motionData.pitch
+        latestDeviceRoll = motionData.roll
+        latestDeviceState = motionData.deviceStateEnum
+
+        if (motionEvaluation.isCriticalSpike) {
+            _currentRiskScore.value = motionEvaluation.riskScore.coerceAtLeast(CRITICAL_THRESHOLD)
+            _currentRiskLevel.value = RiskLevel.CRITICAL
+            return SecurityRecommendation.FORCE_LOGOUT
         }
 
-        if (baselineDeviceRoll != 0f) {
-             val zScore = abs(motionData.roll - baselineDeviceRoll) / 15f
-             if (zScore > maxZScore) maxZScore = zScore
-        }
-        
-        // Convert Z-Score to Risk Score (0.0 - 1.0)
-        // 3 Sigma = 1.0 (High Risk)
-        val instantaneousRisk = (maxZScore / 3.0f).coerceIn(0f, 1f)
-        
-        // Smooth update of current score
-        // Use a faster smoothing factor (0.1) for responsiveness
-        val smoothedScore = (0.1f * instantaneousRisk) + (0.9f * _currentRiskScore.value)
+        val instantaneousRisk = motionEvaluation.riskScore
+        val smoothingFactor = if (motionEvaluation.isHighSpike) 0.45f else 0.1f
+        val smoothedScore = (smoothingFactor * instantaneousRisk) +
+            ((1f - smoothingFactor) * _currentRiskScore.value)
         
         _currentRiskScore.value = smoothedScore
         _currentRiskLevel.value = determineRiskLevel(smoothedScore)
@@ -1035,7 +1110,7 @@ class BehaviorAnalyzer @Inject constructor(
                  BehavioralAnomaly(
                      type = AnomalyType.DEVICE_ORIENTATION_CHANGE,
                      severity = instantaneousRisk,
-                     description = "Real-time orientation anomaly (Z: %.1f)".format(maxZScore)
+                     description = "Real-time motion spike detected"
                  )
              )
             determineRecommendation(_currentRiskLevel.value, anomalies)
@@ -1328,6 +1403,8 @@ class BehaviorAnalyzer @Inject constructor(
         baselineLongPressRatio = 0f
         baselineDevicePitch = 45f
         baselineDeviceRoll = 0f
+        baselineGyroMagnitudeMean = 0.15f
+        baselineGyroMagnitudeStdDev = 0.08f
         baselineDeviceState = DeviceState.UNKNOWN
         consecutiveAbnormalTouches = 0
         consecutiveHighPressureTouches = 0
@@ -1342,6 +1419,7 @@ class BehaviorAnalyzer @Inject constructor(
         latestDevicePitch = 0f
         latestDeviceRoll = 0f
         latestDeviceState = null
+        previousMotionData = null
         _currentRiskScore.value = 0f
         _currentRiskLevel.value = RiskLevel.LOW
 

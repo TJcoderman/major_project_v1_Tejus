@@ -19,6 +19,7 @@ import com.securebank.app.ui.screens.TransferScreen
 import com.securebank.app.ui.viewmodel.AuthViewModel
 import com.securebank.app.ui.viewmodel.BankingViewModel
 import com.securebank.app.ui.viewmodel.ExperimentViewModel
+import kotlinx.coroutines.delay
 
 /**
  * Navigation routes for the app.
@@ -69,6 +70,7 @@ fun SecureBankNavGraph(
 
     LaunchedEffect(authState.isAuthenticated) {
         if (!authState.isAuthenticated) {
+            bankingViewModel.endAuthenticatedSession()
             logoutInProgress = false
         }
     }
@@ -79,7 +81,11 @@ fun SecureBankNavGraph(
     val liveKeystrokeData by bankingViewModel.liveKeystrokeData.collectAsState()
     
     // Security Alert Dialog — severity determines available actions
-    if (showSecurityAlert && !forceLogoutEvent && !logoutInProgress) {
+    val showCriticalLogoutAlert = showSecurityAlert &&
+        forceLogoutEvent &&
+        alertSeverity == AlertSeverity.CRITICAL
+
+    if (showCriticalLogoutAlert || (showSecurityAlert && !forceLogoutEvent && !logoutInProgress)) {
         val currentUser = authState.currentUser
         val verificationValue = currentUser?.pin?.takeIf { it.isNotBlank() }
             ?: currentUser?.passwordHash
@@ -90,6 +96,7 @@ fun SecureBankNavGraph(
             severity = alertSeverity,
             expectedVerificationValue = verificationValue,
             verificationLabel = verificationLabel,
+            autoLogoutSeconds = if (showCriticalLogoutAlert) 3 else null,
             onDismiss = {
                 if (alertSeverity == AlertSeverity.HIGH) {
                     bankingViewModel.acknowledgeVerifiedIdentity()
@@ -101,7 +108,7 @@ fun SecureBankNavGraph(
                 if (!logoutInProgress) {
                     logoutInProgress = true
                     bankingViewModel.dismissSecurityAlert()
-                    bankingViewModel.stopBehavioralCollection()
+                    bankingViewModel.endAuthenticatedSession()
                     authViewModel.logout()
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
@@ -115,11 +122,11 @@ fun SecureBankNavGraph(
     LaunchedEffect(forceLogoutEvent) {
         if (forceLogoutEvent) {
             if (logoutInProgress) {
-                bankingViewModel.acknowledgeForceLogout()
                 return@LaunchedEffect
             }
             logoutInProgress = true
-            bankingViewModel.acknowledgeForceLogout()
+            delay(3000)
+            bankingViewModel.endAuthenticatedSession()
             authViewModel.logout()
             navController.navigate(Screen.Login.route) {
                 popUpTo(0) { inclusive = true }
@@ -129,6 +136,7 @@ fun SecureBankNavGraph(
 
     // Lifecycle observer: pause/resume behavioral collection (item 2)
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    val isAuthenticatedForLifecycle by rememberUpdatedState(authState.isAuthenticated)
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
@@ -136,7 +144,11 @@ fun SecureBankNavGraph(
                     bankingViewModel.pauseBehavioralCollection()
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
-                    bankingViewModel.resumeBehavioralCollection()
+                    if (isAuthenticatedForLifecycle) {
+                        bankingViewModel.resumeBehavioralCollection()
+                    } else {
+                        bankingViewModel.endAuthenticatedSession()
+                    }
                 }
                 else -> {}
             }
@@ -214,7 +226,7 @@ fun SecureBankNavGraph(
                         navController.navigate(Screen.ExperimentHub.route)
                     },
                     onLogout = {
-                        bankingViewModel.stopBehavioralCollection()
+                        bankingViewModel.endAuthenticatedSession()
                         authViewModel.logout()
                         navController.navigate(Screen.Login.route) {
                             popUpTo(0) { inclusive = true }

@@ -105,6 +105,7 @@ fun DashboardScreen(
                     item {
                         BalanceCard(
                             balance = balance,
+                            accountNumber = user.accountNumber,
                             currencyFormat = currencyFormat
                         )
                     }
@@ -259,6 +260,7 @@ private fun DashboardTopBar(
 @Composable
 private fun BalanceCard(
     balance: Double,
+    accountNumber: String,
     currencyFormat: NumberFormat
 ) {
     Card(
@@ -318,7 +320,7 @@ private fun BalanceCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "•••• •••• •••• 7890",
+                        text = maskAccountNumberForDisplay(accountNumber),
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 14.sp
                     )
@@ -331,6 +333,12 @@ private fun BalanceCard(
             }
         }
     }
+}
+
+internal fun maskAccountNumberForDisplay(accountNumber: String): String {
+    val digits = accountNumber.filter { it.isDigit() }
+    val suffix = digits.takeLast(4).ifBlank { "----" }
+    return "•••• •••• •••• $suffix"
 }
 
 @Composable

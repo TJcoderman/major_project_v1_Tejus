@@ -227,12 +227,14 @@ class BankingViewModel @Inject constructor(
     /**
      * Stops all behavioral data collection.
      */
-    fun stopBehavioralCollection() {
+    fun stopBehavioralCollection(stopKeystrokes: Boolean = true) {
         isCollecting = false
         addDebugEvent("Behavioral collectors stopped")
         
         touchDataCollector.stopCollection()
-        keystrokeCollector.stopCollection()
+        if (stopKeystrokes) {
+            keystrokeCollector.stopCollection()
+        }
         sensorDataCollector.stopCollection()
         
         sensorCollectionJob?.cancel()
@@ -244,6 +246,24 @@ class BankingViewModel @Inject constructor(
         touchCollectionJob = null
         keystrokeCollectionJob = null
         riskAssessmentJob = null
+    }
+
+    /**
+     * Ends protected banking mode. Use this on logout/unauthenticated screens so
+     * lifecycle resume cannot restart behavioral monitoring on the login screen.
+     */
+    fun endAuthenticatedSession() {
+        stopBehavioralCollection(stopKeystrokes = false)
+        currentSessionId = ""
+        _showSecurityAlert.value = false
+        _securityAlertMessage.value = ""
+        _alertSeverity.value = AlertSeverity.MEDIUM
+        _forceLogoutEvent.value = false
+        _liveMotionData.value = null
+        _liveTouchData.value = null
+        _liveKeystrokeData.value = null
+        _transferState.value = TransferState()
+        behaviorAnalyzer.reset()
     }
 
     /**

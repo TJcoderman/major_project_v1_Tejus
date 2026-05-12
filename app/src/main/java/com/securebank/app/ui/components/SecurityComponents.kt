@@ -123,13 +123,25 @@ fun SecurityAlertDialog(
     severity: AlertSeverity = AlertSeverity.MEDIUM,
     expectedVerificationValue: String? = null,
     verificationLabel: String = "credential",
+    autoLogoutSeconds: Int? = null,
     onDismiss: () -> Unit,
     onLogout: () -> Unit
 ) {
     var verificationInput by remember(severity, verificationLabel) { mutableStateOf("") }
     var verificationError by remember(severity, verificationLabel) { mutableStateOf<String?>(null) }
+    var secondsRemaining by remember(autoLogoutSeconds) { mutableStateOf(autoLogoutSeconds) }
     val shouldVerify = severity == AlertSeverity.HIGH && !expectedVerificationValue.isNullOrBlank()
     val isPinVerification = verificationLabel.equals("PIN", ignoreCase = true)
+    val isAutoCriticalLogout = severity == AlertSeverity.CRITICAL && autoLogoutSeconds != null
+
+    LaunchedEffect(autoLogoutSeconds) {
+        val startSeconds = autoLogoutSeconds ?: return@LaunchedEffect
+        secondsRemaining = startSeconds
+        for (second in startSeconds - 1 downTo 0) {
+            kotlinx.coroutines.delay(1000)
+            secondsRemaining = second
+        }
+    }
 
     Dialog(
         onDismissRequest = { /* Prevent dismiss by clicking outside */ },
@@ -143,12 +155,21 @@ fun SecurityAlertDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            CoralMuted.copy(alpha = 0.95f),
-                            Obsidian.copy(alpha = 0.98f)
+                    if (severity == AlertSeverity.CRITICAL) {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF8B0000).copy(alpha = 0.98f),
+                                Color(0xFF260404).copy(alpha = 0.99f)
+                            )
                         )
-                    )
+                    } else {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                CoralMuted.copy(alpha = 0.95f),
+                                Obsidian.copy(alpha = 0.98f)
+                            )
+                        )
+                    }
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -181,7 +202,7 @@ fun SecurityAlertDialog(
                     Icon(
                         imageVector = Icons.Default.GppBad,
                         contentDescription = "Security Alert",
-                        tint = Coral,
+                        tint = if (severity == AlertSeverity.CRITICAL) Color.Red else Coral,
                         modifier = Modifier.size(48.dp)
                     )
                 }
@@ -203,6 +224,16 @@ fun SecurityAlertDialog(
                     color = CloudGray,
                     textAlign = TextAlign.Center
                 )
+
+                if (isAutoCriticalLogout) {
+                    Text(
+                        text = "Logging out in ${secondsRemaining ?: autoLogoutSeconds} seconds",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
+                    )
+                }
 
                 if (shouldVerify) {
                     OutlinedTextField(
@@ -253,27 +284,28 @@ fun SecurityAlertDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Logout button always shown
-                    Button(
-                        onClick = onLogout,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Coral
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Logout,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Logout Now",
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    if (!isAutoCriticalLogout) {
+                        Button(
+                            onClick = onLogout,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Coral
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Logout,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Logout Now",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                     
                     // CRITICAL: no dismiss button at all
@@ -341,8 +373,8 @@ fun DebugBehaviorPanel(
     modifier: Modifier = Modifier
 ) {
     val panelScroll = rememberScrollState()
-    val displayRiskScore = explainabilityState.riskScore.takeIf { it > 0f } ?: riskScore
-    val displayRiskLevel = explainabilityState.riskLevel.takeIf { displayRiskScore > 0f } ?: riskLevel
+    val displayRiskScore = riskScore
+    val displayRiskLevel = riskLevel
     val activeRiskColor = riskColor(displayRiskLevel)
 
     AnimatedVisibility(
