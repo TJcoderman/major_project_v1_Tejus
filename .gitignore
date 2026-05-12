@@ -78,3 +78,8 @@ research/paper/*.synctex.gz
 # Collected experiment data (potentially large/sensitive)
 # Uncomment the line below if you do NOT want to push collected data
 # collected_data/
+
+# Local prompt / agent handoff notes
+*_PROMPT.md
+AGENT_HANDOFF_*.md
+TEJUS_PROJECT_WALKTHROUGH.md

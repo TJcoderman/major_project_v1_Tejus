@@ -1,181 +1,243 @@
-# SecureBank - Behavioral Continuous Authentication Demo
+# SecureBank
 
-A mock banking Android application that demonstrates **Continuous Authentication** using behavioral biometrics. This app detects potential session hijacking by analyzing user behavior patterns in real-time.
+SecureBank is a Kotlin Android prototype that demonstrates continuous behavioral authentication for a mock mobile banking app. After login, the app keeps monitoring typing rhythm, touch behavior, PIN interaction patterns, and device motion to detect possible session hijacking.
 
-## 🎯 Project Purpose
+This is a research/demo application, not a production banking system.
 
-This application serves as a **testbed** for researching and demonstrating behavioral authentication techniques. It is **NOT** intended for actual banking use.
+## What The App Does
 
-### Core Concept
-The app continuously monitors user behavior (typing patterns, touch dynamics, device motion) and compares it against a baseline established during login. Significant deviations trigger security alerts, potentially indicating session hijacking.
+- Lets a user sign up and complete guided behavioral enrollment.
+- Stores a local behavioral profile in Room.
+- Allows demo login, dashboard viewing, and simulated fund transfers.
+- Collects live keystroke, touch, and motion signals during a banking session.
+- Compares live behavior against an enrolled baseline.
+- Uses statistical deviation scoring plus an on-device MLP model exported from the Python research pipeline.
+- Shows security actions based on risk:
+  - LOW: continue
+  - MEDIUM: warning
+  - HIGH: re-authentication
+  - CRITICAL: force logout
 
-## 🏗️ Architecture
+## Current Tech Stack
 
-- **Language**: Kotlin
-- **UI Framework**: Jetpack Compose (Material Design 3)
-- **Architecture**: MVVM + Clean Architecture
-- **Dependency Injection**: Hilt
-- **Async Processing**: Coroutines & Flow
-- **Local Storage**: Room Database
+- Kotlin
+- Jetpack Compose + Material 3
+- MVVM with ViewModels
+- Hilt dependency injection
+- Room database
+- Coroutines, Flow, StateFlow, SharedFlow
+- Gson for loading the model JSON
+- Android accelerometer and gyroscope APIs
+- Python research pipeline with pandas, NumPy, scikit-learn, matplotlib, seaborn, and SciPy
 
-```
-com.securebank.app/
-├── data/
-│   ├── local/         # Room database & DAOs
-│   ├── model/         # Data classes
-│   └── repository/    # Data repositories
-├── di/                # Hilt modules
-├── domain/            # Business logic (BehaviorAnalyzer)
-├── sensor/            # Behavioral data collectors
-├── ui/
-│   ├── components/    # Reusable UI components
-│   ├── navigation/    # Navigation graph
-│   ├── screens/       # Screen composables
-│   ├── theme/         # Material theme
-│   └── viewmodel/     # ViewModels
-└── MainActivity.kt
-```
+## App Architecture
 
-## 📊 Behavioral Biometrics Captured
+```text
+Compose screens/components
+  -> ViewModels
+  -> Repositories
+  -> Room DAOs
+  -> Room entities
 
-### 1. Keystroke Dynamics
-- **Dwell Time**: Duration a key is held down
-- **Flight Time**: Time between releasing one key and pressing the next
-- **Typing Speed**: Characters per minute
+Touch/keyboard/sensor collectors
+  -> BehavioralRepository
+  -> BehaviorAnalyzer
+  -> risk state and security actions
 
-### 2. Touch Dynamics
-- **Touch Pressure**: Force applied during touch
-- **Swipe Velocity**: Speed of swipe gestures
-- **Touch Patterns**: Taps, swipes, scrolls, long presses
-
-### 3. Device Motion (Accelerometer & Gyroscope)
-- **Device Orientation**: Pitch, roll, azimuth angles
-- **Device State**: Held in hand, on table, walking, etc.
-- **Movement Patterns**: Filtered sensor data
-
-## 🔐 Anomaly Detection
-
-The `BehaviorAnalyzer` compares current behavior against the login baseline:
-
-```kotlin
-Risk Score = (Keystroke Deviation × 0.35) + 
-             (Touch Deviation × 0.30) + 
-             (Motion Deviation × 0.35)
+Research pipeline
+  -> CSV sessions
+  -> feature dataset
+  -> Android MLP JSON model
+  -> MLModelInference on device
 ```
 
-### Risk Levels
-| Level | Score Range | Action |
-|-------|-------------|--------|
-| LOW | 0% - 30% | Continue normally |
-| MEDIUM | 30% - 60% | Show warning (debug toast) |
-| HIGH | 60% - 80% | Request re-authentication |
-| CRITICAL | 80% - 100% | Force logout |
+## Important Runtime Flow
 
-## 🚀 Getting Started
+### Signup and Enrollment
 
-### Prerequisites
-- Android Studio Hedgehog (2023.1.1) or later
-- JDK 17
-- Android SDK 34
-- Physical device recommended (for accurate sensor data)
+`SignupScreen.kt` and `SignupViewModel.kt` implement account creation plus behavioral calibration:
 
-### Build & Run
+1. User enters full name, username, password, PIN, and account number.
+2. User enters PIN on `CustomPinPad.kt`, which captures real key-down/key-up dwell times.
+3. User taps targets to capture tap pressure/duration/area proxies.
+4. User performs swipe gestures to capture velocity and acceleration.
+5. User holds the phone naturally while motion data is collected.
+6. `SignupViewModel` computes a `BehavioralProfile` and saves it in Room.
 
-1. Clone the repository
-2. Open in Android Studio
-3. Sync Gradle files
-4. Run on device/emulator
+Enrollment supports stepping back and cancelling without killing the app.
 
-### Demo Credentials
-```
-Username: demo
-Password: demo123
-```
+### Login
 
-## 📱 App Features
+`LoginScreen.kt` and `AuthViewModel.kt` handle login. Keystrokes are collected while the user types. On successful login:
 
-### Login Screen
-- Custom keystroke timing capture during password entry
-- Establishes behavioral baseline for the session
+1. A behavioral session is created.
+2. The app loads a stored user profile if available.
+3. If no stored profile exists for seeded demo users, `DemoBehavioralProfiles.kt` supplies a demo profile.
+4. `BehaviorAnalyzer.kt` initializes the baseline and starts monitoring.
 
-### Dashboard
-- Displays mock account balance and transactions
-- Shows real-time risk score indicator
-- Debug panel for behavioral metrics
+### Dashboard and Monitoring
 
-### Transfer Screen
-- Simulated fund transfer functionality
-- Captures keystroke and touch patterns
-- Demonstrates continuous monitoring
+`DashboardScreen.kt` shows balance, transactions, current risk, and optional debug controls. `BankingViewModel.kt` starts collectors for:
 
-## 🔧 Key Components
+- keystrokes via `KeystrokeCollector.kt`
+- touch events via `TouchDataCollector.kt`
+- motion samples via `SensorDataCollector.kt`
 
-### SensorDataCollector
-Manages accelerometer and gyroscope data collection with:
-- Moving average filter for noise reduction
-- Device state inference (held, table, walking)
-- Efficient batch processing
+The app runs real-time touch/motion checks and periodic risk assessment.
 
-### TouchDataCollector
-Captures touch events via Compose's `pointerInput`:
-- Touch classification (tap, swipe, scroll)
-- Velocity and acceleration calculation
-- Pressure tracking
+### Transfer
 
-### KeystrokeCollector
-Records typing patterns from text field changes:
-- Dwell time estimation for software keyboards
-- Flight time between characters
-- Baseline storage during login
+`TransferScreen.kt` provides a simulated transfer flow. On success, the app shows a persistent receipt card with amount, recipient, remarks, and reference ID. The user leaves the screen using the Done button or back button.
 
-### BehaviorAnalyzer
-Core anomaly detection engine:
-- Weighted deviation calculation
-- Exponential smoothing for stability
-- Configurable thresholds
+Transfers are local-only. The app debits the sender balance in Room and inserts a local transaction record.
 
-## ⚙️ Configuration
+## Behavioral Signals
 
-Adjust thresholds in `BehaviorAnalyzer.kt`:
+### Keystroke Dynamics
 
-```kotlin
-const val LOW_THRESHOLD = 0.2f       // 20% deviation
-const val MEDIUM_THRESHOLD = 0.4f    // 40% deviation
-const val HIGH_THRESHOLD = 0.6f      // 60% deviation
-const val CRITICAL_THRESHOLD = 0.8f  // 80% deviation
+- Dwell time: how long a key is held.
+- Flight time: time between keys.
+- Text-entry rhythm from Compose text fields.
+- Real PIN dwell/flight timing from the custom PIN pad.
+
+### Touch Dynamics
+
+- Touch pressure.
+- Touch size / touch area proxy.
+- Tap, swipe, scroll, long-press classification.
+- Duration, hold duration, velocity, and acceleration.
+
+### Motion Dynamics
+
+- Accelerometer values.
+- Gyroscope values.
+- Pitch, roll, and simplified azimuth.
+- Device state inference such as held in hand, on table, walking, stationary, or unknown.
+
+## Risk Engine
+
+The core implementation is in `BehaviorAnalyzer.kt`.
+
+It combines:
+
+- statistical deviation from enrolled baseline
+- real-time touch/motion scoring
+- optional ML risk from the bundled MLP model
+
+The model is loaded by `MLModelInference.kt` from:
+
+```text
+app/src/main/assets/ml/behavioral_auth_model.json
 ```
 
-## 📝 Edge Cases Handled
+The Android feature vector is generated by `MLFeatureExtractor.kt`. It matches the Python export and uses 124 enrollment-relative features.
 
-1. **Screen Rotation**: Sensor data continuity maintained via Hilt singletons
-2. **Background State**: Sensors stopped when app is paused (battery/privacy)
-3. **Permissions**: Motion sensors don't require runtime permissions
-4. **Noise Filtering**: Moving average filter on accelerometer data
+## Research Pipeline
 
-## 🧪 Testing Scenarios
+The offline research code lives in `research/`.
 
-### Simulate Session Hijacking
-1. Login with demo credentials
-2. Note your typing speed and device position
-3. Dramatically change your behavior:
-   - Type much faster/slower
-   - Hold phone at different angle
-   - Use different finger for touches
-4. Observe risk score increase in debug panel
+Main flow:
 
-## 📄 License
+1. `collected_data/SecureBank_Research/` stores real exported participant sessions.
+2. `collected_data/generate_sessions.py` creates genuine/impostor sessions from real enrollment data.
+3. `research/synthetic_data_generator.py` expands the dataset to synthetic participants.
+4. `research/ml_model.py` builds enrollment-relative features and trains Random Forest, MLP, and One-Class SVM models.
+5. `research/generate_visualizations.py` generates paper figures.
+6. `research/results/android_model/behavioral_auth_model.json` is copied into Android assets for on-device inference.
 
-This project is for educational and research purposes only.
+Current result files show:
 
-## 🤝 Contributing
+| Model | Accuracy |
+| --- | ---: |
+| Random Forest | 0.8971 |
+| MLP | 0.8760 |
+| One-Class SVM | 0.8206 |
 
-Contributions welcome! Please focus on:
-- Improved ML-based anomaly detection
-- Additional behavioral features
-- Better noise filtering algorithms
-- Cross-session baseline learning
+The runtime Android app uses the exported MLP JSON model.
 
----
+## Key Files
 
-**Disclaimer**: This is a demonstration application. Do not use for actual financial transactions.
+```text
+app/src/main/java/com/securebank/app/MainActivity.kt
+app/src/main/java/com/securebank/app/SecureBankApplication.kt
+app/src/main/java/com/securebank/app/di/AppModule.kt
+app/src/main/java/com/securebank/app/data/local/SecureBankDatabase.kt
+app/src/main/java/com/securebank/app/data/model/
+app/src/main/java/com/securebank/app/data/repository/
+app/src/main/java/com/securebank/app/sensor/
+app/src/main/java/com/securebank/app/domain/BehaviorAnalyzer.kt
+app/src/main/java/com/securebank/app/domain/MLFeatureExtractor.kt
+app/src/main/java/com/securebank/app/domain/MLModelInference.kt
+app/src/main/java/com/securebank/app/ui/navigation/NavGraph.kt
+app/src/main/java/com/securebank/app/ui/screens/
+app/src/main/java/com/securebank/app/ui/viewmodel/
+app/src/main/assets/ml/behavioral_auth_model.json
+research/ml_model.py
+research/synthetic_data_generator.py
+research/results/
+```
+
+## Demo Credentials
+
+Seeded users are created when the Room database is first created.
+
+```text
+username: demo
+password: demo123
+
+username: john
+password: john123
+
+username: jane
+password: jane123
+```
+
+Seeded demo users use PIN:
+
+```text
+382946
+```
+
+## Build And Test
+
+Use Android Studio or Gradle.
+
+```powershell
+.\gradlew.bat :app:compileDebugKotlin
+.\gradlew.bat :app:testDebugUnitTest
+```
+
+If Gradle/KSP files are locked on Windows:
+
+```powershell
+.\gradlew.bat --stop
+```
+
+## Git Hygiene
+
+Generated files should not be committed:
+
+```text
+.gradle/
+build/
+app/build/
+```
+
+Prompt and agent handoff notes are local working artifacts and should not be committed, except for intentionally retained presentation files.
+
+## Known Limitations
+
+- This is a prototype, not a real banking app.
+- Passwords and PINs are stored/compared in plaintext for demo purposes.
+- There is no backend server.
+- There is no real money movement.
+- Transfer only updates local Room state.
+- Recipient account validation is not production-grade.
+- Software keyboard dwell time is estimated; the custom PIN pad captures real dwell time.
+- Debug controls can inject artificial anomaly risk.
+- Model provenance is local to the repository; the app only validates model shape at runtime.
+
+## Academic Framing
+
+The project demonstrates how continuous behavioral authentication can supplement traditional login-based security in mobile banking. It combines mobile interaction signals, local profile enrollment, statistical anomaly detection, and lightweight on-device ML inference.
 
