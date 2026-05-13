@@ -53,7 +53,7 @@ fun TouchCaptureWrapper(
                     
                     when (event.type) {
                         PointerEventType.Move -> {
-                            touchDataCollector.onTouchMove(change.position)
+                            touchDataCollector.onTouchMove(change.position, change.pressure, 1f)
                             lastPosition = change.position
                             lastPressure = change.pressure
                         }

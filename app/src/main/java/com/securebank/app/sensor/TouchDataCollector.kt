@@ -41,6 +41,8 @@ class TouchDataCollector @Inject constructor() {
     private var lastMovePosition: Offset = Offset.Zero
     private var lastPressure: Float = 0f
     private var lastSize: Float = 0f
+    private val pressureSamples = mutableListOf<Float>()
+    private val sizeSamples = mutableListOf<Float>()
     
     companion object {
         private const val STATIONARY_THRESHOLD = 5f  // px movement threshold for "stationary"
@@ -84,16 +86,24 @@ class TouchDataCollector @Inject constructor() {
         lastMovePosition = position
         lastPressure = pressure
         lastSize = size
+        pressureSamples.clear()
+        sizeSamples.clear()
+        addTouchShapeSample(pressure, size)
     }
     
     /**
      * Called during touch movement (ACTION_MOVE equivalent).
      */
-    fun onTouchMove(position: Offset) {
+    fun onTouchMove(
+        position: Offset,
+        pressure: Float = lastPressure,
+        size: Float = lastSize
+    ) {
         if (!isCollecting) return
         
         val now = System.currentTimeMillis()
         touchMovePositions.add(Pair(position, now))
+        addTouchShapeSample(pressure, size)
         
         // Track hold duration: accumulate time spent stationary
         val distFromLast = calculateDistance(lastMovePosition, position)
@@ -105,6 +115,8 @@ class TouchDataCollector @Inject constructor() {
             stationaryStartTime = now
             lastMovePosition = position
         }
+        lastPressure = pressure
+        lastSize = size
         
         // Keep only recent positions for velocity calculation
         if (touchMovePositions.size > 20) {
@@ -127,6 +139,7 @@ class TouchDataCollector @Inject constructor() {
         val distance = calculateDistance(touchStartPosition, endPosition)
         val velocity = calculateVelocity()
         val acceleration = calculateAcceleration()
+        addTouchShapeSample(pressure, size)
         
         // Finalize hold duration
         if (stationaryStartTime > 0) {
@@ -134,8 +147,8 @@ class TouchDataCollector @Inject constructor() {
         }
         
         // Compute normalized touch area (pressure × size gives a proxy)
-        val avgPressure = (lastPressure + pressure) / 2f
-        val avgSize = (lastSize + size) / 2f
+        val avgPressure = pressureSamples.averageOrFallback((lastPressure + pressure) / 2f)
+        val avgSize = sizeSamples.averageOrFallback((lastSize + size) / 2f)
         val normalizedArea = avgPressure * avgSize
         
         // Classify touch type
@@ -150,8 +163,8 @@ class TouchDataCollector @Inject constructor() {
             startY = touchStartPosition.y,
             endX = endPosition.x,
             endY = endPosition.y,
-            pressure = pressure.coerceIn(0f, 1f),
-            touchSize = size,
+            pressure = avgPressure.coerceIn(0f, 1f),
+            touchSize = avgSize,
             duration = duration,
             velocity = velocity,
             acceleration = acceleration,
@@ -196,10 +209,20 @@ class TouchDataCollector @Inject constructor() {
         } else {
             // Only process movement for the active pointer
             if (activePointerId == currentPointerId) {
-                onTouchMove(position)
+                onTouchMove(position, pressure, size)
             }
         }
     }
+
+    private fun addTouchShapeSample(pressure: Float, size: Float) {
+        pressureSamples.add(pressure.coerceIn(0f, 1f))
+        sizeSamples.add(size.coerceAtLeast(0f))
+        if (pressureSamples.size > 32) pressureSamples.removeAt(0)
+        if (sizeSamples.size > 32) sizeSamples.removeAt(0)
+    }
+
+    private fun List<Float>.averageOrFallback(fallback: Float): Float =
+        if (isEmpty()) fallback else average().toFloat()
     
     /**
      * Classifies the touch type based on duration, distance, and velocity.
@@ -313,6 +336,8 @@ class TouchDataCollector @Inject constructor() {
         lastMovePosition = Offset.Zero
         lastPressure = 0f
         lastSize = 0f
+        pressureSamples.clear()
+        sizeSamples.clear()
     }
     
     /**

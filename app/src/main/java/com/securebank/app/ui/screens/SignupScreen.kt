@@ -4,8 +4,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -445,6 +445,7 @@ private fun PinEnrollmentStep(viewModel: SignupViewModel) {
 @Composable
 private fun TapEnrollmentStep(viewModel: SignupViewModel, touchDataCollector: TouchDataCollector) {
     val tapCount by viewModel.tapCount.collectAsState()
+    val longPressCount by viewModel.longPressCount.collectAsState()
 
     // Collect touch events from the collector and forward to viewModel
     LaunchedEffect(Unit) {
@@ -462,24 +463,28 @@ private fun TapEnrollmentStep(viewModel: SignupViewModel, touchDataCollector: To
         Spacer(modifier = Modifier.height(16.dp))
         Text("Tap the Targets", style = MaterialTheme.typography.titleMedium, color = CloudWhite, fontWeight = FontWeight.Bold)
         Text("Tap naturally — we're learning your touch pattern", color = MutedGray, fontSize = 13.sp)
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "Taps $tapCount/10  Holds $longPressCount/3",
+            color = EmeraldBright,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Grid of tap targets
-        val targetPositions = remember { listOf(0, 1, 2, 3, 4, 5, 6, 7, 8) }
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            for (row in 0..2) {
+            for (row in 0..3) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     for (col in 0..2) {
                         val idx = row * 3 + col
-                        val isTapped = tapCount > idx
+                        val isHoldTarget = idx >= 9
+                        val isTapped = if (isHoldTarget) longPressCount > idx - 9 else tapCount > idx
                         TapTarget(
                             isTapped = isTapped,
-                            onTap = { offset ->
-                                // Touch events come through the collector
-                            },
+                            isHoldTarget = isHoldTarget,
                             touchDataCollector = touchDataCollector
                         )
                     }
@@ -492,7 +497,7 @@ private fun TapEnrollmentStep(viewModel: SignupViewModel, touchDataCollector: To
 @Composable
 private fun TapTarget(
     isTapped: Boolean,
-    onTap: (Offset) -> Unit,
+    isHoldTarget: Boolean,
     touchDataCollector: TouchDataCollector
 ) {
     val scope = rememberCoroutineScope()
@@ -504,7 +509,7 @@ private fun TapTarget(
 
     Box(
         modifier = Modifier
-            .size((80 * scale).dp)
+            .size((72 * scale).dp)
             .clip(CircleShape)
             .background(
                 if (isTapped)
@@ -514,11 +519,24 @@ private fun TapTarget(
             )
             .border(2.dp, if (isTapped) Emerald else ObsidianBorder, CircleShape)
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    onTap(offset)
-                    touchDataCollector.onTouchStart(offset, 0.5f, 1f)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    touchDataCollector.onTouchStart(down.position, down.pressure, 1f)
+                    var lastChange = down
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                            ?: event.changes.firstOrNull()
+                            ?: break
+                        lastChange = change
+                        if (change.pressed) {
+                            touchDataCollector.onTouchMove(change.position, change.pressure, 1f)
+                        } else {
+                            break
+                        }
+                    }
                     scope.launch {
-                        touchDataCollector.onTouchEnd(offset, 0.5f, 1f)
+                        touchDataCollector.onTouchEnd(lastChange.position, lastChange.pressure, 1f)
                     }
                 }
             },
@@ -526,6 +544,8 @@ private fun TapTarget(
     ) {
         if (isTapped) {
             Icon(Icons.Default.Check, null, tint = EmeraldBright, modifier = Modifier.size(24.dp))
+        } else if (isHoldTarget) {
+            Text("HOLD", color = Gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         } else {
             Box(
                 modifier = Modifier
@@ -572,6 +592,34 @@ private fun SwipeEnrollmentStep(viewModel: SignupViewModel, touchDataCollector: 
             SwipeDemoPrompt(
                 title = "Archive a Low-Risk Alert",
                 subtitle = "Swipe down with a relaxed gesture",
+                direction = "DOWN",
+                icon = Icons.Default.KeyboardArrowDown,
+                color = CloudGray
+            ),
+            SwipeDemoPrompt(
+                title = "Confirm Frequent Payee",
+                subtitle = "Swipe right again, slightly slower",
+                direction = "RIGHT",
+                icon = Icons.Default.ArrowForward,
+                color = EmeraldBright
+            ),
+            SwipeDemoPrompt(
+                title = "Cancel Unknown Request",
+                subtitle = "Swipe left with your normal thumb path",
+                direction = "LEFT",
+                icon = Icons.Default.ArrowBack,
+                color = Coral
+            ),
+            SwipeDemoPrompt(
+                title = "Open Receipt Preview",
+                subtitle = "Swipe up with a longer stroke",
+                direction = "UP",
+                icon = Icons.Default.KeyboardArrowUp,
+                color = Gold
+            ),
+            SwipeDemoPrompt(
+                title = "Dismiss Receipt Preview",
+                subtitle = "Swipe down naturally",
                 direction = "DOWN",
                 icon = Icons.Default.KeyboardArrowDown,
                 color = CloudGray
@@ -647,33 +695,40 @@ private fun SwipeEnrollmentStep(viewModel: SignupViewModel, touchDataCollector: 
                 )
                 .border(2.dp, ObsidianBorder, RoundedCornerShape(24.dp))
                 .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            startPos = offset
-                            lastPos = offset
-                            dragOffset = Offset.Zero
-                            touchDataCollector.onTouchStart(offset, 0.62f, 1f)
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragOffset += dragAmount
-                            lastPos = change.position
-                            touchDataCollector.onTouchMove(change.position)
-                            lastDirection = describeSwipeDirection(dragOffset)
-                        },
-                        onDragEnd = {
-                            val endPosition = lastPos.takeIf { it != Offset.Zero } ?: (startPos + dragOffset)
-                            scope.launch {
-                                touchDataCollector.onTouchEnd(endPosition, 0.62f, 1f)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        startPos = down.position
+                        lastPos = down.position
+                        dragOffset = Offset.Zero
+                        touchDataCollector.onTouchStart(down.position, down.pressure, 1f)
+
+                        var lastChange = down
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+                            val dragAmount = change.position - lastChange.position
+                            lastChange = change
+                            if (change.pressed) {
+                                change.consume()
+                                dragOffset += dragAmount
+                                lastPos = change.position
+                                touchDataCollector.onTouchMove(change.position, change.pressure, 1f)
+                                lastDirection = describeSwipeDirection(dragOffset)
+                            } else {
+                                break
                             }
-                            dragOffset = Offset.Zero
-                            lastDirection = "Captured"
-                        },
-                        onDragCancel = {
-                            dragOffset = Offset.Zero
-                            lastDirection = "Try again"
                         }
-                    )
+
+                        val endPosition = lastChange.position.takeIf { it != Offset.Zero }
+                            ?: (startPos + dragOffset)
+                        scope.launch {
+                            touchDataCollector.onTouchEnd(endPosition, lastChange.pressure, 1f)
+                        }
+                        dragOffset = Offset.Zero
+                        lastDirection = "Captured"
+                    }
                 },
             contentAlignment = Alignment.Center
         ) {

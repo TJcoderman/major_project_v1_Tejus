@@ -35,10 +35,12 @@ class SignupViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "SignupViewModel"
-        private const val MIN_PIN_ENTRIES = 2
-        private const val MIN_TAP_SAMPLES = 8
-        private const val MIN_SWIPE_SAMPLES = 4
-        private const val HOLD_DURATION_SECONDS = 4
+        private const val MIN_PIN_ENTRIES = 3
+        private const val MIN_TAP_SAMPLES = 10
+        private const val MIN_LONG_PRESS_SAMPLES = 3
+        private const val MIN_SWIPE_SAMPLES = 8
+        private const val MIN_SWIPE_DIRECTIONS = 4
+        private const val HOLD_DURATION_SECONDS = 6
     }
 
     // ── Form fields ──
@@ -90,11 +92,16 @@ class SignupViewModel @Inject constructor(
     private val _tapCount = MutableStateFlow(0)
     val tapCount: StateFlow<Int> = _tapCount.asStateFlow()
 
+    private val _longPressCount = MutableStateFlow(0)
+    val longPressCount: StateFlow<Int> = _longPressCount.asStateFlow()
+
     private val enrollmentTouches = mutableListOf<TouchData>()
 
     // ── Swipe enrollment ──
     private val _swipeCount = MutableStateFlow(0)
     val swipeCount: StateFlow<Int> = _swipeCount.asStateFlow()
+
+    private val swipeDirectionsCaptured = mutableSetOf<TouchType>()
 
     // ── Hold phone ──
     private val _holdSecondsRemaining = MutableStateFlow(HOLD_DURATION_SECONDS)
@@ -138,6 +145,7 @@ class SignupViewModel @Inject constructor(
                 touchDataCollector.stopCollection()
                 enrollmentTouches.clear()
                 _tapCount.value = 0
+                _longPressCount.value = 0
                 _currentPinInput.value = ""
                 _currentStep.value = EnrollmentStep.PIN_ENTRY
                 _stepProgress.value = "Enter your PIN ${MIN_PIN_ENTRIES} times"
@@ -146,10 +154,12 @@ class SignupViewModel @Inject constructor(
             EnrollmentStep.SWIPE_TEST -> {
                 enrollmentTouches.clear()
                 _tapCount.value = 0
+                _longPressCount.value = 0
                 _swipeCount.value = 0
+                swipeDirectionsCaptured.clear()
                 touchDataCollector.startCollection(enrollmentSessionId)
                 _currentStep.value = EnrollmentStep.TAP_TARGETS
-                _stepProgress.value = "Tap the targets below ($MIN_TAP_SAMPLES needed)"
+                _stepProgress.value = "Tap naturally and hold some targets"
                 true
             }
             EnrollmentStep.HOLD_PHONE -> {
@@ -160,7 +170,7 @@ class SignupViewModel @Inject constructor(
                 _holdSecondsRemaining.value = HOLD_DURATION_SECONDS
                 _holdComplete.value = false
                 _currentStep.value = EnrollmentStep.SWIPE_TEST
-                _stepProgress.value = "Swipe in different directions ($MIN_SWIPE_SAMPLES needed)"
+                _stepProgress.value = "Swipe in each direction ($MIN_SWIPE_SAMPLES samples)"
                 touchDataCollector.startCollection(enrollmentSessionId)
                 true
             }
@@ -261,7 +271,7 @@ class SignupViewModel @Inject constructor(
             if (completed >= MIN_PIN_ENTRIES) {
                 // Move to tap targets
                 _currentStep.value = EnrollmentStep.TAP_TARGETS
-                _stepProgress.value = "Tap the targets below ($MIN_TAP_SAMPLES needed)"
+                _stepProgress.value = "Tap naturally and hold some targets"
                 // Start touch collection for tap phase
                 touchDataCollector.startCollection(enrollmentSessionId)
             }
@@ -281,14 +291,20 @@ class SignupViewModel @Inject constructor(
         val step = _currentStep.value
 
         if (step == EnrollmentStep.TAP_TARGETS) {
-            if (touchData.touchType == TouchType.TAP || touchData.touchType == TouchType.LONG_PRESS) {
-                val count = _tapCount.value + 1
-                _tapCount.value = count
-                _stepProgress.value = "Taps: $count/$MIN_TAP_SAMPLES"
+            if (touchData.touchType == TouchType.TAP) {
+                _tapCount.value += 1
+            } else if (touchData.touchType == TouchType.LONG_PRESS) {
+                _longPressCount.value += 1
+            }
 
-                if (count >= MIN_TAP_SAMPLES) {
+            if (touchData.touchType == TouchType.TAP || touchData.touchType == TouchType.LONG_PRESS) {
+                _stepProgress.value = "Taps: ${_tapCount.value}/$MIN_TAP_SAMPLES  Holds: ${_longPressCount.value}/$MIN_LONG_PRESS_SAMPLES"
+
+                if (_tapCount.value >= MIN_TAP_SAMPLES &&
+                    _longPressCount.value >= MIN_LONG_PRESS_SAMPLES
+                ) {
                     _currentStep.value = EnrollmentStep.SWIPE_TEST
-                    _stepProgress.value = "Swipe in different directions ($MIN_SWIPE_SAMPLES needed)"
+                    _stepProgress.value = "Swipe in each direction ($MIN_SWIPE_SAMPLES samples)"
                 }
             }
         } else if (step == EnrollmentStep.SWIPE_TEST) {
@@ -298,11 +314,16 @@ class SignupViewModel @Inject constructor(
                 TouchType.SCROLL
             )
             if (isSwipe) {
+                if (touchData.touchType != TouchType.SCROLL) {
+                    swipeDirectionsCaptured.add(touchData.touchType)
+                }
                 val count = _swipeCount.value + 1
                 _swipeCount.value = count
-                _stepProgress.value = "Swipes: $count/$MIN_SWIPE_SAMPLES"
+                _stepProgress.value = "Swipes: $count/$MIN_SWIPE_SAMPLES  Directions: ${swipeDirectionsCaptured.size}/$MIN_SWIPE_DIRECTIONS"
 
-                if (count >= MIN_SWIPE_SAMPLES) {
+                if (count >= MIN_SWIPE_SAMPLES &&
+                    swipeDirectionsCaptured.size >= MIN_SWIPE_DIRECTIONS
+                ) {
                     touchDataCollector.stopCollection()
                     startHoldPhonePhase()
                 }
@@ -502,8 +523,10 @@ class SignupViewModel @Inject constructor(
         _pinEntriesCompleted.value = 0
         enrollmentPinKeystrokes.clear()
         _tapCount.value = 0
+        _longPressCount.value = 0
         enrollmentTouches.clear()
         _swipeCount.value = 0
+        swipeDirectionsCaptured.clear()
         _holdSecondsRemaining.value = HOLD_DURATION_SECONDS
         _holdComplete.value = false
         enrollmentMotion.clear()
